@@ -57,38 +57,58 @@ int main() {
     }
 
     // 3. Initialize Mixing Engine: 3 Input Strips, 2 Output Buses
-    constexpr size_t NUM_STRIPS = 3;
-    constexpr size_t NUM_BUSES = 2;
+    // 3. Initialize Mixing Engine: 8 Input Strips, 8 Output Buses (VoiceMeeter Potato layout)
+    constexpr size_t NUM_STRIPS = 8;
+    constexpr size_t NUM_BUSES = 8;
     constexpr size_t BLOCK_SIZE = 480; // 10ms at 48kHz
     constexpr float SAMPLE_RATE = 48000.0f;
 
-    std::cout << "\n[Engine Setup] Initializing 3x2 Matrix Mixer at 48000 Hz, block size " << BLOCK_SIZE << " frames (~10 ms)...\n";
+    std::cout << "\n[Engine Setup] Initializing 8x8 Matrix Mixer at 48000 Hz, block size " << BLOCK_SIZE << " frames (~10 ms)...\n";
     metvoice::matrix::MixerEngine engine(NUM_STRIPS, NUM_BUSES, BLOCK_SIZE, SAMPLE_RATE);
 
-    engine.set_strip_name(0, "Physical Mic (In 1)");
-    engine.set_strip_name(1, "Virtual Aux (In 2)");
-    engine.set_strip_name(2, "Virtual Apps (In 3)");
+    // 5 Physical Inputs + 3 Virtual Inputs
+    engine.set_strip_name(0, "Main Mic");
+    engine.set_strip_name(1, "Laptop Mic");
+    engine.set_strip_name(2, "Hardware In 3");
+    engine.set_strip_name(3, "Hardware In 4");
+    engine.set_strip_name(4, "Hardware In 5");
+    engine.set_strip_name(5, "Main VAIO (Desktop)");
+    engine.set_strip_name(6, "Spotify (AUX VAIO)");
+    engine.set_strip_name(7, "Discord (VAIO 3)");
 
-    engine.set_bus_name(0, "Physical Out A1 (Monitors)");
-    engine.set_bus_name(1, "Virtual Out B1 (Broadcast/Stream)");
+    // 5 Physical Buses + 3 Virtual Buses
+    engine.set_bus_name(0, "A1 Speakers");
+    engine.set_bus_name(1, "A2 Headphones");
+    engine.set_bus_name(2, "A3 Monitors");
+    engine.set_bus_name(3, "A4 Aux Out");
+    engine.set_bus_name(4, "A5 Extra Out");
+    engine.set_bus_name(5, "B1 Broadcast (OBS)");
+    engine.set_bus_name(6, "B2 Comms (Discord)");
+    engine.set_bus_name(7, "B3 Recording");
 
-    // Configure Default Routing:
-    // Strip 0 (Mic) -> Bus B1 (Broadcast)
-    // Strip 1 (Aux) -> Bus A1 (Monitors) and Bus B1 (Broadcast)
-    // Strip 2 (Apps) -> Bus A1 (Monitors) and Bus B1 (Broadcast)
-    engine.routing().set_route(0, 1, true, 0.0f); // Mic -> Stream
-    engine.routing().set_route(1, 0, true, 0.0f); // Aux -> Monitor
-    engine.routing().set_route(1, 1, true, -3.0f); // Aux -> Stream (-3dB)
-    engine.routing().set_route(2, 0, true, 0.0f); // Apps -> Monitor
-    engine.routing().set_route(2, 1, true, -6.0f); // Apps -> Stream (-6dB)
+    // Configure Default Routing (Matching VoiceMeeter Potato defaults):
+    // Mic (0) -> B1 (Broadcast) & B2 (Discord)
+    engine.routing().set_route(0, 5, true, 0.0f); // Mic -> B1
+    engine.routing().set_route(0, 6, true, 0.0f); // Mic -> B2
 
-    // Configure Channel Strip 0 EQ & Compressor (Vocal processing)
-    engine.strip(0).set_eq_low(-3.0f, 80.0f);  // Low rumble cut
-    engine.strip(0).set_eq_mid(+2.0f, 2500.0f, 1.2f); // Speech clarity presence boost
-    engine.strip(0).set_eq_high(+1.5f, 10000.0f); // Air / sheen
+    // Main Desktop (5) -> A1 (Speakers)
+    engine.routing().set_route(5, 0, true, 0.0f);
+
+    // Spotify (6) -> A1 (Speakers) & B1 (Stream)
+    engine.routing().set_route(6, 0, true, 0.0f);
+    engine.routing().set_route(6, 5, true, -3.0f);
+
+    // Discord (7) -> A1 (Speakers)
+    engine.routing().set_route(7, 0, true, 0.0f);
+
+    // Vocal processing preset on Main Mic (Strip 0)
+    engine.strip(0).set_eq_low(-3.0f, 80.0f);
+    engine.strip(0).set_eq_mid(+2.0f, 2500.0f, 1.2f);
+    engine.strip(0).set_eq_high(+1.5f, 10000.0f);
     engine.strip(0).enable_eq(true);
     engine.strip(0).configure_compressor(-18.0f, 3.5f, 12.0f, 80.0f, 4.0f, 3.0f);
     engine.strip(0).enable_compressor(true);
+
 
     // 4. Start Named Pipe IPC Server
     std::cout << "[IPC Server] Starting control interface on \\\\.\\pipe\\MetVoice_Control...\n";

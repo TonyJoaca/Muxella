@@ -141,6 +141,56 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
         return "{\"status\":\"error\",\"message\":\"invalid bus index\"}\n";
     }
 
+    if (cmd == "bus_mute" || cmd == "SET_BUS_MUTE") {
+        // Syntax: bus_mute <bus_idx> <0|1>
+        size_t idx = 0;
+        int m = 0;
+        if (iss >> idx >> m) {
+            if (idx < engine.num_buses()) {
+                engine.bus(idx).set_mute(m != 0);
+                return "{\"status\":\"ok\",\"bus\":" + std::to_string(idx) + ",\"mute\":" + (m ? "true" : "false") + "}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"invalid bus mute parameters\"}\n";
+    }
+
+    if (cmd == "eq" || cmd == "SET_EQ") {
+        // Syntax: eq <strip_idx> <low_db> <mid_db> <high_db>
+        size_t idx = 0;
+        float low = 0.0f, mid = 0.0f, high = 0.0f;
+        if (iss >> idx >> low >> mid >> high) {
+            if (idx < engine.num_strips()) {
+                engine.strip(idx).set_eq_low(low);
+                engine.strip(idx).set_eq_mid(mid);
+                engine.strip(idx).set_eq_high(high);
+                engine.strip(idx).enable_eq(true);
+                return "{\"status\":\"ok\",\"strip\":" + std::to_string(idx) + ",\"eq\":\"updated\"}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"invalid eq parameters\"}\n";
+    }
+
+    if (cmd == "comp" || cmd == "SET_COMP") {
+        // Syntax: comp <strip_idx> <amount 0..10>
+        size_t idx = 0;
+        float amount = 0.0f;
+        if (iss >> idx >> amount) {
+            if (idx < engine.num_strips()) {
+                if (amount <= 0.01f) {
+                    engine.strip(idx).enable_compressor(false);
+                } else {
+                    float thresh = -10.0f - (amount * 3.0f); // -13dB to -40dB
+                    float ratio = 1.5f + (amount * 0.8f);   // 2.3:1 to 9.5:1
+                    engine.strip(idx).configure_compressor(thresh, ratio, 10.0f, 80.0f, 4.0f, amount * 0.8f);
+                    engine.strip(idx).enable_compressor(true);
+                }
+                return "{\"status\":\"ok\",\"strip\":" + std::to_string(idx) + ",\"comp\":" + std::to_string(amount) + "}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"invalid comp parameters\"}\n";
+    }
+
+
     return "{\"status\":\"error\",\"message\":\"unknown command: " + cmd + "\"}\n";
 }
 

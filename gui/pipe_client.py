@@ -2,7 +2,6 @@ import ctypes
 from ctypes import wintypes
 import json
 import logging
-import time
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("metvoice.pipe")
@@ -72,14 +71,12 @@ class MetVoicePipeClient:
             mode = wintypes.DWORD(PIPE_READMODE_MESSAGE)
             SetNamedPipeHandleState(h_pipe, ctypes.byref(mode), None, None)
 
-            # Write request
             cmd_bytes = cmd_text.encode("utf-8")
             written = wintypes.DWORD(0)
             success = WriteFile(h_pipe, cmd_bytes, len(cmd_bytes), ctypes.byref(written), None)
             if not success:
                 return None
 
-            # Read response
             buffer = ctypes.create_string_buffer(8192)
             bytes_read = wintypes.DWORD(0)
             success = ReadFile(h_pipe, buffer, len(buffer) - 1, ctypes.byref(bytes_read), None)
@@ -116,3 +113,12 @@ class MetVoicePipeClient:
 
     def set_bus_gain(self, bus_idx: int, gain_db: float):
         self.send_command(f"bus_gain {bus_idx} {gain_db:.1f}")
+
+    def set_bus_mute(self, bus_idx: int, mute: bool):
+        self.send_command(f"bus_mute {bus_idx} {1 if mute else 0}")
+
+    def set_eq(self, strip_idx: int, low_db: float, mid_db: float, high_db: float):
+        self.send_command(f"eq {strip_idx} {low_db:.1f} {mid_db:.1f} {high_db:.1f}")
+
+    def set_comp(self, strip_idx: int, amount: float):
+        self.send_command(f"comp {strip_idx} {amount:.1f}")
