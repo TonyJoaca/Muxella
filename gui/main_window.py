@@ -3,14 +3,14 @@ import sys
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtCore import Qt, QTimer, QSize, QPoint
 from PyQt6.QtGui import QIcon, QPixmap, QMovie, QColor, QFont
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QSlider, QFrame, QGroupBox, QPlainTextEdit,
-    QCheckBox, QScrollArea, QSplitter, QApplication
+    QCheckBox, QScrollArea, QSplitter, QApplication, QMenu, QLineEdit
 )
 
 from .widgets import BlockyVuMeter, BlockyKnob, CrtScanlineOverlay
@@ -18,24 +18,165 @@ from .pipe_client import MetVoicePipeClient
 from .theme import ACCENT_PURPLE, ACCENT_GREEN, BG_BLACK, BORDER_OUTLINE, SURFACE_CARD
 
 
+class EditableTitle(QLineEdit):
+    """
+    In-place editable title that looks like a retro cyber label,
+    becoming an editable field upon click or focus.
+    """
+    def __init__(self, default_text: str, on_changed_callback=None, text_color: str = ACCENT_PURPLE, parent=None):
+        super().__init__(default_text, parent)
+        self.on_changed_callback = on_changed_callback
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet(f"""
+            QLineEdit {{
+                background: transparent;
+                border: 1px solid transparent;
+                color: {text_color};
+                font-weight: bold;
+                font-size: 8.5pt;
+                padding: 1px 2px;
+            }}
+            QLineEdit:hover {{
+                border: 1px dashed #7b29a8;
+                background: #0f031c;
+            }}
+            QLineEdit:focus {{
+                border: 1.5px solid {ACCENT_GREEN};
+                background: #0d0217;
+                color: {ACCENT_GREEN};
+            }}
+        """)
+        self.returnPressed.connect(self._on_submit)
+        self.editingFinished.connect(self._on_submit)
+
+    def _on_submit(self):
+        self.clearFocus()
+        if self.on_changed_callback:
+            self.on_changed_callback(self.text())
+
+
+class DeviceSelectorButton(QPushButton):
+    """
+    Clickable device dropdown button that mimics VoiceMeeter Potato's
+    device selector (e.g. [Mic (Realtek) v] or [A1 v Speakers]).
+    """
+    def __init__(self, initial_label: str, is_render: bool, get_devices_func, on_selected_func, parent=None):
+        super().__init__(f"{initial_label} ▾", parent)
+        self.is_render = is_render
+        self.get_devices_func = get_devices_func
+        self.on_selected_func = on_selected_func
+
+        self.setFixedHeight(22)
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: #0b0214;
+                color: #b829ea;
+                border: 1px solid #7b29a8;
+                font-size: 7.5pt;
+                padding: 2px 4px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #1c0630;
+                color: #00ff66;
+                border: 1px solid #00ff66;
+            }
+            QPushButton:pressed {
+                background-color: #3b0d66;
+            }
+        """)
+        self.clicked.connect(self._open_menu)
+
+    def _open_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #080110;
+                border: 1.5px solid #b829ea;
+                color: #d15fff;
+                padding: 4px;
+                font-size: 8pt;
+            }
+            QMenu::item {
+                padding: 5px 14px;
+                border-radius: 0px;
+            }
+            QMenu::item:selected {
+                background-color: #24083b;
+                color: #00ff66;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #4a1469;
+                margin: 4px 0px;
+            }
+        """)
+
+        devices_data = self.get_devices_func()
+        dev_list = []
+        if devices_data:
+            dev_list = devices_data.get("renders" if self.is_render else "captures", [])
+
+        # Default fallback devices if pipe is not yet populated
+        if not dev_list:
+            if not self.is_render:
+                dev_list = [
+                    {"name": "Microphone (Realtek Audio)"},
+                    {"name": "Headset Microphone (Realtek(R) Audio)"},
+                    {"name": "Stereo Mix (Realtek Audio)"},
+                    {"name": "USB Audio Device Microphone"},
+                ]
+            else:
+                dev_list = [
+                    {"name": "Speakers (Realtek Audio)"},
+                    {"name": "Headphones (Realtek(R) Audio)"},
+                    {"name": "Digital Audio (HDMI / DisplayPort)"},
+                    {"name": "USB Audio Device Out"},
+                ]
+
+        tag = "OUTPUT" if self.is_render else "INPUT"
+        hdr = menu.addAction(f"--- WASAPI {tag} DEVICES ---")
+        hdr.setEnabled(False)
+
+        for dev in dev_list:
+            d_name = dev.get("name", "Audio Device")
+            act = menu.addAction(f"[WDM] {d_name}")
+            act.triggered.connect(lambda _, n=d_name: self._handle_selection(n))
+
+        menu.addSeparator()
+        disc_act = menu.addAction("[X] - Disconnect / Remove Device -")
+        disc_act.triggered.connect(lambda: self._handle_selection("Select Device"))
+
+        menu.exec(self.mapToGlobal(QPoint(0, self.height())))
+
+    def _handle_selection(self, full_name: str):
+        short = full_name.replace("[WDM] ", "")
+        display = (short[:15] + "..") if len(short) > 17 else short
+        self.setText(f"{display} ▾")
+        if self.on_selected_func:
+            self.on_selected_func(full_name)
+
+
 class PhysicalInputStrip(QFrame):
     """
     Physical Input Strip (Strips 1..5) in ACCELA blocky style with VoiceMeeter Potato features:
-    - Device label
+    - Editable Strip Title
+    - Clickable Device Selector Dropdown [Dev ▾]
     - Comp, Gate, Denoiser knobs
     - Reverb & Delay FX sends
     - Full 8-bus matrix routing buttons [A1..A5, B1..B3]
     - [MONO], [SOLO], [MUTE]
     - Gain Fader & Blocky LED VU Meter
     """
-    def __init__(self, strip_id: int, title: str, default_device: str, client: MetVoicePipeClient, log_callback, parent=None):
+    def __init__(self, strip_id: int, default_title: str, default_dev: str, client: MetVoicePipeClient, get_devices_func, log_callback, parent=None):
         super().__init__(parent)
         self.strip_id = strip_id
-        self.title = title
+        self.title = default_title
         self.client = client
+        self.get_devices_func = get_devices_func
         self.log_callback = log_callback
 
-        self.setFixedWidth(135)
+        self.setFixedWidth(138)
         self.setFrameShape(QFrame.Shape.Box)
         self.setStyleSheet(f"""
             PhysicalInputStrip {{
@@ -48,18 +189,18 @@ class PhysicalInputStrip(QFrame):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(4)
 
-        # 1. Header & Device
-        hdr_lbl = QLabel(title.upper())
-        hdr_lbl.setStyleSheet(f"color: {ACCENT_PURPLE}; font-weight: bold; font-size: 8.5pt;")
-        hdr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hdr_lbl)
+        # 1. Editable Title
+        self.title_edit = EditableTitle(default_title, self._on_title_edited, ACCENT_PURPLE, self)
+        layout.addWidget(self.title_edit)
 
-        dev_lbl = QLabel(default_device)
-        dev_lbl.setStyleSheet("color: #7b29a8; font-size: 7pt;")
-        dev_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(dev_lbl)
+        # 2. Clickable Device Dropdown Button
+        self.dev_btn = DeviceSelectorButton(default_dev, is_render=False,
+                                            get_devices_func=self.get_devices_func,
+                                            on_selected_func=self._on_device_selected,
+                                            parent=self)
+        layout.addWidget(self.dev_btn)
 
-        # 2. FX Knobs Row (Comp, Gate, Denoiser)
+        # 3. FX Knobs Row (Comp, Gate, Denoiser)
         knobs_box = QHBoxLayout()
         knobs_box.setSpacing(2)
 
@@ -83,7 +224,7 @@ class PhysicalInputStrip(QFrame):
         fx_box.addWidget(self.delay_knob)
         layout.addLayout(fx_box)
 
-        # 3. Routing Grid [A1..A5] and [B1..B3]
+        # 4. Routing Grid [A1..A5] and [B1..B3]
         route_group = QGroupBox("BUS ROUTING")
         route_group.setStyleSheet(f"QGroupBox {{ font-size: 7.5pt; border: 1px solid #4a1469; margin-top: 4px; }}")
         route_grid = QGridLayout(route_group)
@@ -96,7 +237,7 @@ class PhysicalInputStrip(QFrame):
         for b_idx, b_name in enumerate(bus_names):
             btn = QPushButton(b_name)
             btn.setCheckable(True)
-            btn.setFixedSize(26, 20)
+            btn.setFixedSize(27, 20)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     font-size: 7.5pt; padding: 0px;
@@ -111,7 +252,6 @@ class PhysicalInputStrip(QFrame):
                     font-weight: bold;
                 }}
             """)
-            # Default routing: Mic 0 to B1 & B2
             if strip_id == 0 and b_name in ["B1", "B2"]:
                 btn.setChecked(True)
             elif strip_id > 0 and b_name == "B1":
@@ -120,13 +260,13 @@ class PhysicalInputStrip(QFrame):
             btn.clicked.connect(lambda chk, b=b_idx: self._on_route_clicked(b, chk))
             self.route_buttons.append(btn)
 
-            row = 0 if b_idx < 4 else (1 if b_idx < 8 else 2)
+            row = 0 if b_idx < 4 else 1
             col = b_idx % 4
             route_grid.addWidget(btn, row, col)
 
         layout.addWidget(route_group)
 
-        # 4. Fader & Meter Section
+        # 5. Fader & Meter Section
         fader_row = QHBoxLayout()
         fader_row.setSpacing(6)
 
@@ -150,7 +290,7 @@ class PhysicalInputStrip(QFrame):
         fader_row.addLayout(fader_col)
         layout.addLayout(fader_row)
 
-        # 5. Quick Toggles: MONO / SOLO / MUTE
+        # 6. Quick Toggles: MONO / SOLO / MUTE
         toggles_layout = QVBoxLayout()
         toggles_layout.setSpacing(2)
 
@@ -177,6 +317,14 @@ class PhysicalInputStrip(QFrame):
         toggles_layout.addWidget(self.mute_btn)
 
         layout.addLayout(toggles_layout)
+
+    def _on_title_edited(self, new_text: str):
+        self.title = new_text
+        self.client.rename_strip(self.strip_id, new_text)
+        self.log_callback(f"Strip {self.strip_id + 1} renamed to: {new_text}")
+
+    def _on_device_selected(self, dev_name: str):
+        self.log_callback(f"Strip {self.strip_id + 1} [{self.title}] assigned to input: {dev_name}")
 
     def _on_route_clicked(self, bus_idx: int, enabled: bool):
         self.client.set_route(self.strip_id, bus_idx, enabled, 0.0)
@@ -208,17 +356,17 @@ class PhysicalInputStrip(QFrame):
 class VirtualInputStrip(QFrame):
     """
     Virtual Input Strip (Strips 6..8) in ACCELA blocky style with VoiceMeeter Potato features:
-    - Virtual format label (48.0 kHz)
+    - Editable Title (e.g. Main VAIO, Spotify, Discord)
     - 3-band Equalizer knobs (Bass, Mid, Treble)
     - Surround/Pan balance
     - Full 8-bus matrix routing buttons [A1..A5, B1..B3]
     - [M.C], [SOLO], [MUTE]
     - Gain Fader & Multi-channel Blocky LED VU Meter
     """
-    def __init__(self, strip_id: int, title: str, subtitle: str, client: MetVoicePipeClient, log_callback, parent=None):
+    def __init__(self, strip_id: int, default_title: str, subtitle: str, client: MetVoicePipeClient, log_callback, parent=None):
         super().__init__(parent)
         self.strip_id = strip_id
-        self.title = title
+        self.title = default_title
         self.client = client
         self.log_callback = log_callback
 
@@ -235,11 +383,9 @@ class VirtualInputStrip(QFrame):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(4)
 
-        # 1. Header
-        hdr_lbl = QLabel(title.upper())
-        hdr_lbl.setStyleSheet(f"color: {ACCENT_GREEN}; font-weight: bold; font-size: 8.5pt;")
-        hdr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hdr_lbl)
+        # 1. Editable Title
+        self.title_edit = EditableTitle(default_title, self._on_title_edited, ACCENT_GREEN, self)
+        layout.addWidget(self.title_edit)
 
         sub_lbl = QLabel(subtitle)
         sub_lbl.setStyleSheet("color: #7b29a8; font-size: 7pt;")
@@ -308,10 +454,8 @@ class VirtualInputStrip(QFrame):
                     font-weight: bold;
                 }}
             """)
-            # Virtual inputs default to A1 (Speakers)
             if b_name == "A1":
                 btn.setChecked(True)
-            # Spotify to Stream B1 as well
             if strip_id == 6 and b_name == "B1":
                 btn.setChecked(True)
 
@@ -376,6 +520,11 @@ class VirtualInputStrip(QFrame):
 
         layout.addLayout(toggles_layout)
 
+    def _on_title_edited(self, new_text: str):
+        self.title = new_text
+        self.client.rename_strip(self.strip_id, new_text)
+        self.log_callback(f"Virtual Strip {self.strip_id + 1} renamed to: {new_text}")
+
     def _on_eq_changed(self):
         low = self.bass_knob.value
         mid = self.mid_knob.value
@@ -412,21 +561,25 @@ class VirtualInputStrip(QFrame):
 class MasterBusStrip(QFrame):
     """
     Master Output Bus Strip (A1..A5 Physical, B1..B3 Virtual) in ACCELA blocky style:
-    - Bus ID badge (e.g. [A1] SPEAKERS)
+    - Editable Bus Title (e.g. Speakers, Headphones, OBS Stream)
+    - Clickable Device Dropdown for A1..A5 [Device ▾]
     - [SEL], [MONO], [EQ] buttons
     - Master Fader & Master Blocky LED VU Meter
     - Master [MUTE]
     - Soft Limiter safety status indicator
     """
-    def __init__(self, bus_id: int, bus_code: str, name: str, is_virtual: bool, client: MetVoicePipeClient, log_callback, parent=None):
+    def __init__(self, bus_id: int, bus_code: str, default_name: str, is_virtual: bool,
+                 client: MetVoicePipeClient, get_devices_func, log_callback, parent=None):
         super().__init__(parent)
         self.bus_id = bus_id
         self.bus_code = bus_code
-        self.name = name
+        self.name = default_name
+        self.is_virtual = is_virtual
         self.client = client
+        self.get_devices_func = get_devices_func
         self.log_callback = log_callback
 
-        self.setFixedWidth(105)
+        self.setFixedWidth(112)
         self.setFrameShape(QFrame.Shape.Box)
         border_col = "#00ff66" if is_virtual else "#a855f7"
         self.setStyleSheet(f"""
@@ -440,18 +593,29 @@ class MasterBusStrip(QFrame):
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(4)
 
-        # Bus Tag
+        # 1. Bus Tag & Editable Name
         code_lbl = QLabel(f"[{bus_code}]")
-        code_lbl.setStyleSheet(f"color: {border_col}; font-weight: bold; font-size: 9.5pt;")
+        code_lbl.setStyleSheet(f"color: {border_col}; font-weight: bold; font-size: 9pt;")
         code_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(code_lbl)
 
-        name_lbl = QLabel(name)
-        name_lbl.setStyleSheet("color: #7b29a8; font-size: 7pt;")
-        name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(name_lbl)
+        self.title_edit = EditableTitle(default_name, self._on_title_edited, border_col, self)
+        layout.addWidget(self.title_edit)
 
-        # Mode Toggles
+        # 2. Clickable Hardware Out Dropdown for physical buses A1..A5
+        if not is_virtual:
+            self.dev_btn = DeviceSelectorButton(default_name, is_render=True,
+                                                get_devices_func=self.get_devices_func,
+                                                on_selected_func=self._on_device_selected,
+                                                parent=self)
+            layout.addWidget(self.dev_btn)
+        else:
+            virt_lbl = QLabel("VIRTUAL BUS")
+            virt_lbl.setStyleSheet("color: #00aa44; font-size: 7.5pt;")
+            virt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(virt_lbl)
+
+        # 3. Mode Toggles
         mode_box = QHBoxLayout()
         mode_box.setSpacing(2)
 
@@ -466,7 +630,7 @@ class MasterBusStrip(QFrame):
         mode_box.addWidget(eq_btn)
         layout.addLayout(mode_box)
 
-        # Meter + Fader
+        # 4. Meter + Fader
         fader_row = QHBoxLayout()
         fader_row.setSpacing(4)
 
@@ -490,18 +654,26 @@ class MasterBusStrip(QFrame):
         fader_row.addLayout(fader_col)
         layout.addLayout(fader_row)
 
-        # Master MUTE
+        # 5. Master MUTE
         self.mute_btn = QPushButton("MUTE")
         self.mute_btn.setCheckable(True)
         self.mute_btn.setFixedHeight(24)
         self.mute_btn.clicked.connect(self._on_mute_clicked)
         layout.addWidget(self.mute_btn)
 
-        # Limiter indicator
+        # 6. Limiter indicator
         limiter_badge = QLabel("● LIMITER")
         limiter_badge.setStyleSheet(f"color: {border_col}; font-size: 7pt; border: 1px solid {border_col}; padding: 1px;")
         limiter_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(limiter_badge)
+
+    def _on_title_edited(self, new_text: str):
+        self.name = new_text
+        self.client.rename_bus(self.bus_id, new_text)
+        self.log_callback(f"Master Bus {self.bus_code} renamed to: {new_text}")
+
+    def _on_device_selected(self, dev_name: str):
+        self.log_callback(f"Master Bus [{self.bus_code}] assigned to output: {dev_name}")
 
     def _on_fader_changed(self, val: int):
         db = val / 10.0
@@ -525,6 +697,7 @@ class MetVoiceMainWindow(QMainWindow):
 
         self.client = MetVoicePipeClient()
         self.engine_process = None
+        self._cached_devices = None
 
         self._ensure_engine_running()
         self._init_ui()
@@ -533,6 +706,12 @@ class MetVoiceMainWindow(QMainWindow):
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self._poll_telemetry)
         self.poll_timer.start(33)
+
+        # Device Cache Timer (refresh every 3 seconds)
+        self.dev_timer = QTimer(self)
+        self.dev_timer.timeout.connect(self._refresh_device_cache)
+        self.dev_timer.start(3000)
+        self._refresh_device_cache()
 
     def _ensure_engine_running(self):
         if self.client.send_command("status"):
@@ -547,6 +726,14 @@ class MetVoiceMainWindow(QMainWindow):
                 )
             except Exception as e:
                 print(f"Failed to start audio engine: {e}")
+
+    def _refresh_device_cache(self):
+        devs = self.client.get_devices()
+        if devs:
+            self._cached_devices = devs
+
+    def _get_devices(self) -> Optional[Dict[str, Any]]:
+        return self._cached_devices
 
     def _init_ui(self):
         central = QWidget(self)
@@ -579,7 +766,7 @@ class MetVoiceMainWindow(QMainWindow):
         hdr_vbox.setSpacing(0)
         title_lbl = QLabel("METVOICE // CYBER AUDIO MATRIX")
         title_lbl.setStyleSheet(f"color: {ACCENT_PURPLE}; font-size: 13pt; font-weight: bold; letter-spacing: 2px;")
-        sub_lbl = QLabel("8-CHANNEL HARDWARE & VIRTUAL CONSOLE // WASAPI MMCSS PRO AUDIO")
+        sub_lbl = QLabel("CLICKABLE HARDWARE SELECTORS // IN-PLACE EDITABLE LABELS // PRO AUDIO")
         sub_lbl.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 7.5pt;")
         hdr_vbox.addWidget(title_lbl)
         hdr_vbox.addWidget(sub_lbl)
@@ -587,7 +774,6 @@ class MetVoiceMainWindow(QMainWindow):
 
         top_bar.addStretch()
 
-        # Engine Telemetry Pill
         self.status_pill = QLabel("● PRO AUDIO MMCSS ACTIVE (48000 Hz | 480 FRAMES)")
         self.status_pill.setStyleSheet(f"""
             QLabel {{
@@ -614,7 +800,7 @@ class MetVoiceMainWindow(QMainWindow):
 
         # A. 5 PHYSICAL INPUT STRIPS
         phys_box = QVBoxLayout()
-        phys_hdr = QLabel("PHYSICAL INPUTS (1..5)")
+        phys_hdr = QLabel("PHYSICAL INPUTS (1..5) - [CLICK DEVICE TO SELECT]")
         phys_hdr.setStyleSheet(f"color: {ACCENT_PURPLE}; font-size: 8pt; font-weight: bold;")
         phys_box.addWidget(phys_hdr)
 
@@ -631,7 +817,7 @@ class MetVoiceMainWindow(QMainWindow):
         ]
 
         for s_idx, (t, dev) in enumerate(phys_configs):
-            strip = PhysicalInputStrip(s_idx, t, dev, self.client, self.log_message, self)
+            strip = PhysicalInputStrip(s_idx, t, dev, self.client, self._get_devices, self.log_message, self)
             self.physical_strips.append(strip)
             phys_strips_row.addWidget(strip)
 
@@ -646,7 +832,7 @@ class MetVoiceMainWindow(QMainWindow):
 
         # B. 3 VIRTUAL INPUT STRIPS (VAIO 1..3)
         virt_box = QVBoxLayout()
-        virt_hdr = QLabel("VIRTUAL INPUTS (VAIO 1..3)")
+        virt_hdr = QLabel("VIRTUAL INPUTS (VAIO 1..3) - [CLICK TITLE TO RENAME]")
         virt_hdr.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 8pt; font-weight: bold;")
         virt_box.addWidget(virt_hdr)
 
@@ -676,7 +862,7 @@ class MetVoiceMainWindow(QMainWindow):
 
         # C. 8 MASTER OUTPUT BUSES (A1..A5 Physical + B1..B3 Virtual)
         master_box = QVBoxLayout()
-        master_hdr = QLabel("MASTER OUTPUT BUSES (A1..A5 PHYSICAL / B1..B3 VIRTUAL)")
+        master_hdr = QLabel("MASTER OUTPUT BUSES (A1..A5 HARDWARE OUT / B1..B3 VIRTUAL)")
         master_hdr.setStyleSheet("color: #a855f7; font-size: 8pt; font-weight: bold;")
         master_box.addWidget(master_hdr)
 
@@ -696,7 +882,7 @@ class MetVoiceMainWindow(QMainWindow):
         ]
 
         for b_idx, code, name, is_v in bus_configs:
-            bus_strip = MasterBusStrip(b_idx, code, name, is_v, self.client, self.log_message, self)
+            bus_strip = MasterBusStrip(b_idx, code, name, is_v, self.client, self._get_devices, self.log_message, self)
             self.master_buses.append(bus_strip)
             master_strips_row.addWidget(bus_strip)
 
@@ -706,7 +892,7 @@ class MetVoiceMainWindow(QMainWindow):
         scroll_area.setWidget(desk_widget)
         main_layout.addWidget(scroll_area, stretch=5)
 
-        # 3. Diagnostic Cyber Terminal (Matching ASSella screenshot)
+        # 3. Diagnostic Cyber Terminal
         term_box = QVBoxLayout()
         term_box.setSpacing(2)
 
@@ -721,9 +907,9 @@ class MetVoiceMainWindow(QMainWindow):
         main_layout.addLayout(term_box, stretch=1)
 
         self.log_message("MetVoice 8x8 Cyber Audio Matrix initialized.")
-        self.log_message("All 5 Physical Strips, 3 Virtual Strips, and 8 Master Buses loaded.")
+        self.log_message("Device selector dropdowns active. In-place editable titles active.")
 
-        # 4. Bottom Titlebar (Matching ACCELA screenshot)
+        # 4. Bottom Titlebar
         bottom_bar = QFrame(self)
         bottom_bar.setFixedHeight(34)
         bottom_bar.setStyleSheet(f"""
@@ -763,7 +949,7 @@ class MetVoiceMainWindow(QMainWindow):
 
         main_layout.addWidget(bottom_bar)
 
-        # Subtle CRT scanline overlay
+        # CRT Scanlines overlay
         self.scanlines = CrtScanlineOverlay(self)
         self.scanlines.setGeometry(self.rect())
         self.scanlines.lower()
@@ -789,14 +975,12 @@ class MetVoiceMainWindow(QMainWindow):
         self.status_pill.setStyleSheet(f"background-color: #0b2413; color: {ACCENT_GREEN}; border: 1.5px solid {ACCENT_GREEN}; padding: 4px 12px; font-weight: bold; font-size: 8pt;")
 
         strips_data = data.get("strips", [])
-        # Strips 0..4 are physical
         for i in range(min(5, len(strips_data))):
             s_info = strips_data[i]
             pl = s_info.get("peak_l", -60.0)
             pr = s_info.get("peak_r", -60.0)
             self.physical_strips[i].meter.set_levels(pl, pr)
 
-        # Strips 5..7 are virtual
         for idx, s_idx in enumerate([5, 6, 7]):
             if s_idx < len(strips_data):
                 s_info = strips_data[s_idx]
@@ -804,7 +988,6 @@ class MetVoiceMainWindow(QMainWindow):
                 pr = s_info.get("peak_r", -60.0)
                 self.virtual_strips[idx].meter.set_levels(pl, pr)
 
-        # Master Buses (0..7)
         buses_data = data.get("buses", [])
         for j in range(min(len(self.master_buses), len(buses_data))):
             b_info = buses_data[j]

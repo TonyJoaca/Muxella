@@ -1,10 +1,63 @@
 #include "metvoice/ipc/named_pipe_server.hpp"
 #include "metvoice/ipc/protocol.hpp"
+#include "metvoice/core/wasapi_backend.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <windows.h>
 
 namespace metvoice::ipc {
+
+namespace {
+    std::string wstring_to_utf8(const std::wstring& wstr) {
+        if (wstr.empty()) return "";
+        int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
+        std::string str(size_needed, 0);
+        WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), &str[0], size_needed, nullptr, nullptr);
+        return str;
+    }
+}
+
+std::string CommandDispatcher::serialize_devices_json() {
+    auto captures = core::WasapiEndpoint::enumerate_devices(core::DeviceType::Capture);
+    auto renders = core::WasapiEndpoint::enumerate_devices(core::DeviceType::Render);
+
+    std::ostringstream ss;
+    ss << "{\"type\":\"devices\",\"captures\":[";
+    for (size_t i = 0; i < captures.size(); ++i) {
+        if (i > 0) ss << ",";
+        std::string name = wstring_to_utf8(captures[i].friendly_name);
+        std::string clean_name;
+        for (char c : name) {
+            if (c == '\"' || c == '\\') clean_name += '\\';
+            clean_name += c;
+        }
+        ss << "{\"index\":" << i
+           << ",\"name\":\"" << clean_name << "\""
+           << ",\"default\":" << (captures[i].is_default ? "true" : "false")
+           << ",\"rate\":" << captures[i].default_sample_rate
+           << ",\"channels\":" << captures[i].channels
+           << "}";
+    }
+    ss << "],\"renders\":[";
+    for (size_t j = 0; j < renders.size(); ++j) {
+        if (j > 0) ss << ",";
+        std::string name = wstring_to_utf8(renders[j].friendly_name);
+        std::string clean_name;
+        for (char c : name) {
+            if (c == '\"' || c == '\\') clean_name += '\\';
+            clean_name += c;
+        }
+        ss << "{\"index\":" << j
+           << ",\"name\":\"" << clean_name << "\""
+           << ",\"default\":" << (renders[j].is_default ? "true" : "false")
+           << ",\"rate\":" << renders[j].default_sample_rate
+           << ",\"channels\":" << renders[j].channels
+           << "}";
+    }
+    ss << "]}";
+    return ss.str();
+}
 
 std::string CommandDispatcher::serialize_meters_json(const matrix::MixerEngine& engine) {
     std::ostringstream ss;
@@ -49,7 +102,6 @@ std::string CommandDispatcher::serialize_status_json(const matrix::MixerEngine& 
 }
 
 std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, const std::string& request) {
-    // Simple command line / JSON parser
     std::istringstream iss(request);
     std::string cmd;
     iss >> cmd;
@@ -60,9 +112,39 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     if (cmd == "status" || cmd == "GET_STATUS") {
         return serialize_status_json(engine) + "\n";
     }
+    if (cmd == "devices" || cmd == "GET_DEVICES") {
+        return serialize_devices_json() + "\n";
+    }
+
+    if (cmd == "rename_strip" || cmd == "SET_STRIP_NAME") {
+        size_t idx = 0;
+        if (iss >> idx) {
+            std::string new_name;
+            std::getline(iss, new_name);
+            while (!new_name.empty() && new_name.front() == ' ') new_name.erase(0, 1);
+            if (idx < engine.num_strips() && !new_name.empty()) {
+                engine.set_strip_name(idx, new_name);
+                return "{\"status\":\"ok\",\"strip\":" + std::to_string(idx) + ",\"name\":\"" + new_name + "\"}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"invalid rename parameters\"}\n";
+    }
+
+    if (cmd == "rename_bus" || cmd == "SET_BUS_NAME") {
+        size_t idx = 0;
+        if (iss >> idx) {
+            std::string new_name;
+            std::getline(iss, new_name);
+            while (!new_name.empty() && new_name.front() == ' ') new_name.erase(0, 1);
+            if (idx < engine.num_buses() && !new_name.empty()) {
+                engine.set_bus_name(idx, new_name);
+                return "{\"status\":\"ok\",\"bus\":" + std::to_string(idx) + ",\"name\":\"" + new_name + "\"}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"invalid rename parameters\"}\n";
+    }
 
     if (cmd == "gain" || cmd == "SET_GAIN") {
-        // Syntax: gain <strip_idx> <gain_db>
         size_t idx = 0;
         float gain_db = 0.0f;
         if (iss >> idx >> gain_db) {
@@ -75,7 +157,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "pan" || cmd == "SET_PAN") {
-        // Syntax: pan <strip_idx> <pan_val> (-1.0 to 1.0)
         size_t idx = 0;
         float pan = 0.0f;
         if (iss >> idx >> pan) {
@@ -88,7 +169,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "mute" || cmd == "SET_MUTE") {
-        // Syntax: mute <strip_idx> <0|1>
         size_t idx = 0;
         int m = 0;
         if (iss >> idx >> m) {
@@ -101,7 +181,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "solo" || cmd == "SET_SOLO") {
-        // Syntax: solo <strip_idx> <0|1>
         size_t idx = 0;
         int s = 0;
         if (iss >> idx >> s) {
@@ -114,7 +193,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "route" || cmd == "SET_ROUTE") {
-        // Syntax: route <strip_idx> <bus_idx> <0|1> [gain_db]
         size_t s_idx = 0, b_idx = 0;
         int enable = 0;
         float gain = 0.0f;
@@ -129,7 +207,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "bus_gain" || cmd == "SET_BUS_GAIN") {
-        // Syntax: bus_gain <bus_idx> <gain_db>
         size_t idx = 0;
         float gain_db = 0.0f;
         if (iss >> idx >> gain_db) {
@@ -142,7 +219,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "bus_mute" || cmd == "SET_BUS_MUTE") {
-        // Syntax: bus_mute <bus_idx> <0|1>
         size_t idx = 0;
         int m = 0;
         if (iss >> idx >> m) {
@@ -155,7 +231,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "eq" || cmd == "SET_EQ") {
-        // Syntax: eq <strip_idx> <low_db> <mid_db> <high_db>
         size_t idx = 0;
         float low = 0.0f, mid = 0.0f, high = 0.0f;
         if (iss >> idx >> low >> mid >> high) {
@@ -171,7 +246,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     }
 
     if (cmd == "comp" || cmd == "SET_COMP") {
-        // Syntax: comp <strip_idx> <amount 0..10>
         size_t idx = 0;
         float amount = 0.0f;
         if (iss >> idx >> amount) {
@@ -179,8 +253,8 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
                 if (amount <= 0.01f) {
                     engine.strip(idx).enable_compressor(false);
                 } else {
-                    float thresh = -10.0f - (amount * 3.0f); // -13dB to -40dB
-                    float ratio = 1.5f + (amount * 0.8f);   // 2.3:1 to 9.5:1
+                    float thresh = -10.0f - (amount * 3.0f);
+                    float ratio = 1.5f + (amount * 0.8f);
                     engine.strip(idx).configure_compressor(thresh, ratio, 10.0f, 80.0f, 4.0f, amount * 0.8f);
                     engine.strip(idx).enable_compressor(true);
                 }
@@ -189,7 +263,6 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
         }
         return "{\"status\":\"error\",\"message\":\"invalid comp parameters\"}\n";
     }
-
 
     return "{\"status\":\"error\",\"message\":\"unknown command: " + cmd + "\"}\n";
 }
@@ -216,7 +289,6 @@ void NamedPipeServer::stop() {
 
     stop_signal_.store(true);
 
-    // Create a dummy client connection to unblock any ConnectNamedPipe
     HANDLE dummy = CreateFileW(pipe_name_.c_str(), GENERIC_READ | GENERIC_WRITE,
                                0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (dummy != INVALID_HANDLE_VALUE) {
@@ -254,7 +326,6 @@ void NamedPipeServer::server_worker_thread() {
                 buffer[bytesRead] = '\0';
                 std::string req(buffer);
 
-                // Trim trailing carriage return/newlines
                 while (!req.empty() && (req.back() == '\r' || req.back() == '\n' || req.back() == ' ')) {
                     req.pop_back();
                 }

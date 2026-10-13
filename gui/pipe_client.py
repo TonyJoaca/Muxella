@@ -122,3 +122,19 @@ class MetVoicePipeClient:
 
     def set_comp(self, strip_idx: int, amount: float):
         self.send_command(f"comp {strip_idx} {amount:.1f}")
+
+    def get_devices(self) -> Optional[Dict[str, Any]]:
+        resp = self.send_command("devices")
+        if not resp:
+            return None
+        try:
+            return json.loads(resp)
+        except Exception:
+            return None
+
+    def rename_strip(self, strip_idx: int, name: str):
+        self.send_command(f"rename_strip {strip_idx} {name}")
+
+    def rename_bus(self, bus_idx: int, name: str):
+        self.send_command(f"rename_bus {bus_idx} {name}")
+

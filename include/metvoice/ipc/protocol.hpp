@@ -16,6 +16,7 @@ public:
 
     static std::string serialize_meters_json(const matrix::MixerEngine& engine);
     static std::string serialize_status_json(const matrix::MixerEngine& engine);
+    static std::string serialize_devices_json();
 };
 
 } // namespace metvoice::ipc
