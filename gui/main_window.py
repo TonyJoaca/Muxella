@@ -324,7 +324,13 @@ class PhysicalInputStrip(QFrame):
         self.log_callback(f"Strip {self.strip_id + 1} renamed to: {new_text}")
 
     def _on_device_selected(self, dev_name: str):
-        self.log_callback(f"Strip {self.strip_id + 1} [{self.title}] assigned to input: {dev_name}")
+        cleaned = dev_name.replace("[WDM] ", "").strip()
+        if "Disconnect" in cleaned or "Select Device" in cleaned:
+            self.client.send_command(f"detach_input {self.strip_id}")
+            self.log_callback(f"Strip {self.strip_id + 1} [{self.title}] disconnected")
+        else:
+            self.client.attach_input(self.strip_id, cleaned)
+            self.log_callback(f"Strip {self.strip_id + 1} [{self.title}] attached to: {cleaned}")
 
     def _on_route_clicked(self, bus_idx: int, enabled: bool):
         self.client.set_route(self.strip_id, bus_idx, enabled, 0.0)
@@ -654,9 +660,11 @@ class MasterBusStrip(QFrame):
         fader_row.addLayout(fader_col)
         layout.addLayout(fader_row)
 
-        # 5. Master MUTE
+        # 5. Master MUTE (Starts active by default for silent safety)
         self.mute_btn = QPushButton("MUTE")
         self.mute_btn.setCheckable(True)
+        self.mute_btn.setChecked(True)
+        self.mute_btn.setStyleSheet("background-color: #ff1a53; color: #ffffff; border: 1.5px solid #ff1a53; font-weight: bold;")
         self.mute_btn.setFixedHeight(24)
         self.mute_btn.clicked.connect(self._on_mute_clicked)
         layout.addWidget(self.mute_btn)
@@ -673,7 +681,13 @@ class MasterBusStrip(QFrame):
         self.log_callback(f"Master Bus {self.bus_code} renamed to: {new_text}")
 
     def _on_device_selected(self, dev_name: str):
-        self.log_callback(f"Master Bus [{self.bus_code}] assigned to output: {dev_name}")
+        cleaned = dev_name.replace("[WDM] ", "").strip()
+        if "Disconnect" in cleaned or "Select Device" in cleaned:
+            self.client.send_command(f"detach_output {self.bus_id}")
+            self.log_callback(f"Master Bus [{self.bus_code}] disconnected")
+        else:
+            self.client.attach_output(self.bus_id, cleaned)
+            self.log_callback(f"Master Bus [{self.bus_code}] attached to: {cleaned}")
 
     def _on_fader_changed(self, val: int):
         db = val / 10.0
@@ -731,8 +745,27 @@ class MetVoiceMainWindow(QMainWindow):
         devs = self.client.get_devices()
         if devs:
             self._cached_devices = devs
+            self._sync_device_buttons(devs)
+
+    def _sync_device_buttons(self, devs: Dict[str, Any]):
+        attached_inputs = devs.get("attached_inputs", [])
+        for idx, dev_name in enumerate(attached_inputs):
+            if hasattr(self, "strips") and idx < len(self.strips) and dev_name and dev_name != "None":
+                short = dev_name.replace("[WDM] ", "").strip()
+                display = (short[:15] + "..") if len(short) > 17 else short
+                self.strips[idx].dev_btn.setText(f"{display} ▾")
+
+        attached_outputs = devs.get("attached_outputs", [])
+        for idx, dev_name in enumerate(attached_outputs):
+            if hasattr(self, "buses") and idx < len(self.buses) and hasattr(self.buses[idx], "dev_btn") and dev_name and dev_name != "None":
+                short = dev_name.replace("[WDM] ", "").strip()
+                display = (short[:15] + "..") if len(short) > 17 else short
+                self.buses[idx].dev_btn.setText(f"{display} ▾")
 
     def _get_devices(self) -> Optional[Dict[str, Any]]:
+        fresh = self.client.get_devices()
+        if fresh:
+            self._cached_devices = fresh
         return self._cached_devices
 
     def _init_ui(self):

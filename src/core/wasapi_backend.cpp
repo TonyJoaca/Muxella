@@ -3,11 +3,12 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <iostream>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 
 namespace metvoice::core {
 
 namespace {
-    // Helper to extract device name from property store
     std::wstring get_device_property(IPropertyStore* props, const PROPERTYKEY& key) {
         if (!props) return L"Unknown";
         PROPVARIANT var;
@@ -74,7 +75,6 @@ std::vector<DeviceInfo> WasapiEndpoint::enumerate_devices(DeviceType type) {
                 info.type = type;
                 info.is_default = (id == default_id);
 
-                // Check default mix format
                 IAudioClient* client = nullptr;
                 if (SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                                                reinterpret_cast<void**>(&client))) && client) {
@@ -118,7 +118,6 @@ bool WasapiEndpoint::start() {
         worker_thread_ = std::thread(&WasapiEndpoint::render_thread_proc, this);
     }
 
-    // Wait until started or failed
     for (int i = 0; i < 50; ++i) {
         if (running_.load()) return true;
         Sleep(10);
@@ -148,19 +147,27 @@ void WasapiEndpoint::capture_thread_proc() {
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                           __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
     if (FAILED(hr)) {
+        std::cerr << "[Capture Error] CoCreateInstance failed: hr=0x" << std::hex << hr << std::dec << "\n";
         if (co_init) CoUninitialize();
         return;
     }
 
     if (info_.id.empty()) {
         EDataFlow flow = (info_.type == DeviceType::LoopbackRender) ? eRender : eCapture;
-        enumerator->GetDefaultAudioEndpoint(flow, eConsole, &device_);
+        hr = enumerator->GetDefaultAudioEndpoint(flow, eConsole, &device_);
+        if (FAILED(hr)) {
+            std::cerr << "[Capture Error] GetDefaultAudioEndpoint failed: hr=0x" << std::hex << hr << std::dec << "\n";
+        }
     } else {
-        enumerator->GetDevice(info_.id.c_str(), &device_);
+        hr = enumerator->GetDevice(info_.id.c_str(), &device_);
+        if (FAILED(hr)) {
+            std::cerr << "[Capture Error] GetDevice failed for ID: hr=0x" << std::hex << hr << std::dec << "\n";
+        }
     }
     enumerator->Release();
 
     if (!device_) {
+        std::cerr << "[Capture Error] device_ is null\n";
         if (co_init) CoUninitialize();
         return;
     }
@@ -168,6 +175,7 @@ void WasapiEndpoint::capture_thread_proc() {
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                            reinterpret_cast<void**>(&audio_client_));
     if (FAILED(hr) || !audio_client_) {
+        std::cerr << "[Capture Error] Activate IAudioClient failed: hr=0x" << std::hex << hr << std::dec << "\n";
         device_->Release();
         device_ = nullptr;
         if (co_init) CoUninitialize();
@@ -176,6 +184,7 @@ void WasapiEndpoint::capture_thread_proc() {
 
     hr = audio_client_->GetMixFormat(&wave_format_);
     if (FAILED(hr) || !wave_format_) {
+        std::cerr << "[Capture Error] GetMixFormat failed: hr=0x" << std::hex << hr << std::dec << "\n";
         audio_client_->Release();
         audio_client_ = nullptr;
         device_->Release();
@@ -184,7 +193,6 @@ void WasapiEndpoint::capture_thread_proc() {
         return;
     }
 
-    // 10ms default requested duration (100,000 in 100ns units)
     REFERENCE_TIME req_duration = static_cast<REFERENCE_TIME>(config_.buffer_frames) * 10000000 / wave_format_->nSamplesPerSec;
     DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
     if (info_.type == DeviceType::LoopbackRender) {
@@ -194,6 +202,13 @@ void WasapiEndpoint::capture_thread_proc() {
     hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, stream_flags, req_duration,
                                    0, wave_format_, nullptr);
     if (FAILED(hr)) {
+        // Fallback to 0 (default device buffer duration) for virtual/third-party drivers
+        hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, stream_flags, 0,
+                                       0, wave_format_, nullptr);
+    }
+
+    if (FAILED(hr)) {
+        std::cerr << "[WasapiEndpoint Capture] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
         CoTaskMemFree(wave_format_);
         wave_format_ = nullptr;
         audio_client_->Release();
@@ -205,9 +220,15 @@ void WasapiEndpoint::capture_thread_proc() {
     }
 
     audio_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    audio_client_->SetEventHandle(audio_event_);
+    hr = audio_client_->SetEventHandle(audio_event_);
+    if (FAILED(hr)) {
+        std::cerr << "[Capture Error] SetEventHandle failed: hr=0x" << std::hex << hr << std::dec << "\n";
+    }
     audio_client_->GetBufferSize(&buffer_frame_count_);
-    audio_client_->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&capture_client_));
+    hr = audio_client_->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(&capture_client_));
+    if (FAILED(hr)) {
+        std::cerr << "[Capture Error] GetService IAudioCaptureClient failed: hr=0x" << std::hex << hr << std::dec << "\n";
+    }
 
     if (!capture_client_) {
         CloseHandle(audio_event_);
@@ -222,11 +243,20 @@ void WasapiEndpoint::capture_thread_proc() {
         return;
     }
 
-    std::vector<float> temp_conv_buf;
-    temp_conv_buf.resize(buffer_frame_count_ * wave_format_->nChannels);
+    const size_t in_channels = wave_format_->nChannels;
+    const uint32_t in_rate = wave_format_->nSamplesPerSec;
+    const bool is_float = (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+        (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+         reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT));
+
+    std::vector<float> stereo_conv_buf;
+    stereo_conv_buf.reserve(buffer_frame_count_ * 4);
 
     audio_client_->Start();
     running_.store(true);
+
+    double resample_phase = 0.0;
+    const double resample_ratio = static_cast<double>(in_rate) / 48000.0;
 
     while (!stop_signal_.load(std::memory_order_relaxed)) {
         DWORD wait_res = WaitForSingleObject(audio_event_, 100);
@@ -241,36 +271,82 @@ void WasapiEndpoint::capture_thread_proc() {
             DWORD flags = 0;
 
             hr = capture_client_->GetBuffer(&data, &frames_available, &flags, nullptr, nullptr);
-            if (SUCCEEDED(hr) && data) {
-                const size_t total_samples = frames_available * wave_format_->nChannels;
+            if (SUCCEEDED(hr) && data && frames_available > 0) {
+                stereo_conv_buf.clear();
 
-                if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
-                    std::fill_n(temp_conv_buf.data(), total_samples, 0.0f);
-                } else {
-                    // Check if standard 32-bit float or 16-bit integer PCM
-                    if (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
-                        (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-                         reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
-                        const float* float_src = reinterpret_cast<const float*>(data);
-                        std::memcpy(temp_conv_buf.data(), float_src, total_samples * sizeof(float));
+                auto extract_sample = [&](size_t offset) -> float {
+                    if (is_float) {
+                        return reinterpret_cast<const float*>(data)[offset];
                     } else if (wave_format_->wBitsPerSample == 16) {
-                        const int16_t* s16 = reinterpret_cast<const int16_t*>(data);
-                        constexpr float SCALE = 1.0f / 32768.0f;
-                        for (size_t s = 0; s < total_samples; ++s) {
-                            temp_conv_buf[s] = static_cast<float>(s16[s]) * SCALE;
+                        return static_cast<float>(reinterpret_cast<const int16_t*>(data)[offset]) / 32768.0f;
+                    } else if (wave_format_->wBitsPerSample == 24) {
+                        if (wave_format_->nBlockAlign == wave_format_->nChannels * 3) {
+                            const uint8_t* p = data + (offset * 3);
+                            int32_t s24 = static_cast<int32_t>(p[0]) |
+                                          (static_cast<int32_t>(p[1]) << 8) |
+                                          (static_cast<int32_t>(static_cast<int8_t>(p[2])) << 16);
+                            return static_cast<float>(s24) / 8388608.0f;
+                        } else {
+                            return static_cast<float>(reinterpret_cast<const int32_t*>(data)[offset] >> 8) / 8388608.0f;
                         }
-                    } else if (wave_format_->wBitsPerSample == 24 || wave_format_->wBitsPerSample == 32) {
-                        const int32_t* s32 = reinterpret_cast<const int32_t*>(data);
-                        constexpr float SCALE = 1.0f / 2147483648.0f;
-                        for (size_t s = 0; s < total_samples; ++s) {
-                            temp_conv_buf[s] = static_cast<float>(s32[s]) * SCALE;
+                    } else if (wave_format_->wBitsPerSample == 32) {
+                        return static_cast<float>(reinterpret_cast<const int32_t*>(data)[offset]) / 2147483648.0f;
+                    }
+                    return 0.0f;
+                };
+
+                // Convert whatever input format to clean stereo
+                std::vector<float> input_stereo(frames_available * 2);
+                if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+                    std::fill(input_stereo.begin(), input_stereo.end(), 0.0f);
+                } else {
+                    for (size_t f = 0; f < frames_available; ++f) {
+                        float left = 0.0f;
+                        float right = 0.0f;
+
+                        if (in_channels == 1) {
+                            float s = extract_sample(f);
+                            left = s;
+                            right = s; // Duplicate mono microphone to both Left and Right!
+                        } else {
+                            left = extract_sample(f * in_channels + 0);
+                            right = extract_sample(f * in_channels + 1);
                         }
+
+                        input_stereo[f * 2 + 0] = left;
+                        input_stereo[f * 2 + 1] = right;
                     }
                 }
 
-                // Write to lock-free ring buffer
-                if (ring_buffer_) {
-                    ring_buffer_->write(temp_conv_buf.data(), total_samples);
+                // If sample rate is already 48000 Hz:
+                if (in_rate == 48000) {
+                    if (ring_buffer_) {
+                        ring_buffer_->write(input_stereo.data(), input_stereo.size());
+                    }
+                } else {
+                    // Resample to 48000 Hz using linear interpolation
+                    size_t in_f = 0;
+                    while (in_f < frames_available) {
+                        size_t idx0 = in_f;
+                        size_t idx1 = std::min(in_f + 1, static_cast<size_t>(frames_available - 1));
+                        float frac = static_cast<float>(resample_phase);
+
+                        float l = input_stereo[idx0 * 2 + 0] * (1.0f - frac) + input_stereo[idx1 * 2 + 0] * frac;
+                        float r = input_stereo[idx0 * 2 + 1] * (1.0f - frac) + input_stereo[idx1 * 2 + 1] * frac;
+
+                        stereo_conv_buf.push_back(l);
+                        stereo_conv_buf.push_back(r);
+
+                        resample_phase += resample_ratio;
+                        while (resample_phase >= 1.0) {
+                            resample_phase -= 1.0;
+                            in_f++;
+                        }
+                    }
+
+                    if (ring_buffer_ && !stereo_conv_buf.empty()) {
+                        ring_buffer_->write(stereo_conv_buf.data(), stereo_conv_buf.size());
+                    }
                 }
 
                 capture_client_->ReleaseBuffer(frames_available);
@@ -340,6 +416,13 @@ void WasapiEndpoint::render_thread_proc() {
     hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                                    req_duration, 0, wave_format_, nullptr);
     if (FAILED(hr)) {
+        // Fallback to 0 (default device buffer duration) for virtual/third-party drivers
+        hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                       0, 0, wave_format_, nullptr);
+    }
+
+    if (FAILED(hr)) {
+        std::cerr << "[WasapiEndpoint Render] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
         CoTaskMemFree(wave_format_);
         wave_format_ = nullptr;
         audio_client_->Release();
@@ -368,10 +451,21 @@ void WasapiEndpoint::render_thread_proc() {
         return;
     }
 
-    std::vector<float> temp_conv_buf;
-    temp_conv_buf.resize(buffer_frame_count_ * wave_format_->nChannels, 0.0f);
+    const size_t out_channels = wave_format_->nChannels;
+    const bool is_float = (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
+        (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
+         reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT));
 
-    // Prime the render buffer with silence before starting
+    std::vector<float> stereo_read_buf;
+    stereo_read_buf.resize(buffer_frame_count_ * 2, 0.0f);
+
+    // Pre-buffer / prime the ring buffer with 20ms of silence so render never starves on cold start
+    if (ring_buffer_) {
+        std::vector<float> prime_silence(buffer_frame_count_ * 4, 0.0f);
+        ring_buffer_->write(prime_silence.data(), prime_silence.size());
+    }
+
+    // Prime hardware render buffer
     BYTE* initial_buffer = nullptr;
     if (SUCCEEDED(render_client_->GetBuffer(buffer_frame_count_, &initial_buffer)) && initial_buffer) {
         render_client_->ReleaseBuffer(buffer_frame_count_, AUDCLNT_BUFFERFLAGS_SILENT);
@@ -395,34 +489,57 @@ void WasapiEndpoint::render_thread_proc() {
         BYTE* render_data = nullptr;
         hr = render_client_->GetBuffer(frames_needed, &render_data);
         if (SUCCEEDED(hr) && render_data) {
-            const size_t samples_needed = frames_needed * wave_format_->nChannels;
+            const size_t stereo_samples_needed = frames_needed * 2;
 
             size_t samples_read = 0;
             if (ring_buffer_) {
-                samples_read = ring_buffer_->read(temp_conv_buf.data(), samples_needed);
-            }
-
-            // Zero out any remaining samples in case of underrun
-            if (samples_read < samples_needed) {
-                std::fill(temp_conv_buf.data() + samples_read, temp_conv_buf.data() + samples_needed, 0.0f);
-            }
-
-            // Output format conversion
-            if (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
-                (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
-                 reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
-                std::memcpy(render_data, temp_conv_buf.data(), samples_needed * sizeof(float));
-            } else if (wave_format_->wBitsPerSample == 16) {
-                int16_t* dst16 = reinterpret_cast<int16_t*>(render_data);
-                for (size_t s = 0; s < samples_needed; ++s) {
-                    float val = std::clamp(temp_conv_buf[s], -1.0f, 1.0f);
-                    dst16[s] = static_cast<int16_t>(val * 32767.0f);
+                size_t avail = ring_buffer_->available_read();
+                if (avail >= stereo_samples_needed) {
+                    samples_read = ring_buffer_->read(stereo_read_buf.data(), stereo_samples_needed);
                 }
-            } else if (wave_format_->wBitsPerSample == 24 || wave_format_->wBitsPerSample == 32) {
-                int32_t* dst32 = reinterpret_cast<int32_t*>(render_data);
-                for (size_t s = 0; s < samples_needed; ++s) {
-                    float val = std::clamp(temp_conv_buf[s], -1.0f, 1.0f);
-                    dst32[s] = static_cast<int32_t>(val * 2147483647.0f);
+            }
+
+            if (samples_read < stereo_samples_needed) {
+                std::fill(stereo_read_buf.data() + samples_read, stereo_read_buf.data() + stereo_samples_needed, 0.0f);
+            }
+
+            auto write_sample = [&](size_t offset, float val) {
+                val = std::clamp(val, -1.0f, 1.0f);
+                if (is_float) {
+                    reinterpret_cast<float*>(render_data)[offset] = val;
+                } else if (wave_format_->wBitsPerSample == 16) {
+                    reinterpret_cast<int16_t*>(render_data)[offset] = static_cast<int16_t>(val * 32767.0f);
+                } else if (wave_format_->wBitsPerSample == 24) {
+                    if (wave_format_->nBlockAlign == wave_format_->nChannels * 3) {
+                        int32_t s24 = static_cast<int32_t>(val * 8388607.0f);
+                        uint8_t* p = render_data + (offset * 3);
+                        p[0] = static_cast<uint8_t>(s24 & 0xFF);
+                        p[1] = static_cast<uint8_t>((s24 >> 8) & 0xFF);
+                        p[2] = static_cast<uint8_t>((s24 >> 16) & 0xFF);
+                    } else {
+                        int32_t s24 = static_cast<int32_t>(val * 8388607.0f);
+                        reinterpret_cast<int32_t*>(render_data)[offset] = (s24 << 8);
+                    }
+                } else if (wave_format_->wBitsPerSample == 32) {
+                    reinterpret_cast<int32_t*>(render_data)[offset] = static_cast<int32_t>(val * 2147483647.0f);
+                }
+            };
+
+            for (size_t f = 0; f < frames_needed; ++f) {
+                float left = stereo_read_buf[f * 2 + 0];
+                float right = stereo_read_buf[f * 2 + 1];
+
+                if (out_channels == 1) {
+                    write_sample(f, 0.5f * (left + right));
+                } else if (out_channels == 2) {
+                    write_sample(f * 2 + 0, left);
+                    write_sample(f * 2 + 1, right);
+                } else {
+                    write_sample(f * out_channels + 0, left);
+                    write_sample(f * out_channels + 1, right);
+                    for (size_t c = 2; c < out_channels; ++c) {
+                        write_sample(f * out_channels + c, 0.0f);
+                    }
                 }
             }
 

@@ -109,34 +109,32 @@ int main() {
     engine.strip(0).configure_compressor(-18.0f, 3.5f, 12.0f, 80.0f, 4.0f, 3.0f);
     engine.strip(0).enable_compressor(true);
 
+    // Safety: Start all master buses muted so no unexpected audio plays
+    for (size_t b = 0; b < NUM_BUSES; ++b) {
+        engine.bus(b).set_mute(true);
+    }
 
-    // 4. Start Named Pipe IPC Server
+
+    // 4. Initialize Dynamic Endpoint Manager
+    timeBeginPeriod(1);
+    metvoice::core::EndpointManager ep_mgr(engine);
+
+    // 5. Start Named Pipe IPC Server with EndpointManager
     std::cout << "[IPC Server] Starting control interface on \\\\.\\pipe\\MetVoice_Control...\n";
-    metvoice::ipc::NamedPipeServer pipe_server(engine);
+    metvoice::ipc::NamedPipeServer pipe_server(engine, &ep_mgr);
     pipe_server.start();
 
-    // 5. Connect Real Audio Endpoints if available
-    std::unique_ptr<metvoice::core::WasapiEndpoint> capture_ep;
-    std::unique_ptr<metvoice::core::WasapiEndpoint> render_ep;
-
-    metvoice::core::AudioStreamConfig stream_cfg;
-    stream_cfg.sample_rate = 48000;
-    stream_cfg.channels = 2;
-    stream_cfg.buffer_frames = BLOCK_SIZE;
-
+    // 6. Connect Default Hardware Endpoints
     if (!capture_devices.empty()) {
-        std::wcout << L"[Endpoint Attach] Attaching Strip 0 to input device: " << capture_devices[0].friendly_name << L"\n";
-        capture_ep = std::make_unique<metvoice::core::WasapiEndpoint>(
-            capture_devices[0], stream_cfg, engine.strip_input_ring_buffer(0));
-        capture_ep->start();
+        std::wcout << L"[Endpoint Attach] Attaching Strip 0 to default input: " << capture_devices[0].friendly_name << L"\n";
+        ep_mgr.attach_input(0, "0");
     }
 
     if (!render_devices.empty()) {
-        std::wcout << L"[Endpoint Attach] Attaching Bus 0 to output device: " << render_devices[0].friendly_name << L"\n";
-        render_ep = std::make_unique<metvoice::core::WasapiEndpoint>(
-            render_devices[0], stream_cfg, engine.bus_output_ring_buffer(0));
-        render_ep->start();
+        std::wcout << L"[Endpoint Attach] Attaching Bus 0 to default output: " << render_devices[0].friendly_name << L"\n";
+        ep_mgr.attach_output(0, "0");
     }
+
 
     // 6. Real-Time Audio Engine Processing Loop
     std::cout << "\n[Engine Active] Starting Real-Time Mixing Thread with MMCSS Pro Audio scheduling...\n";
@@ -183,13 +181,14 @@ int main() {
     std::cout << "\n[Shutdown] Stopping MetVoice engine cleanly...\n";
     g_shutdown.store(true);
 
-    if (capture_ep) capture_ep->stop();
-    if (render_ep) render_ep->stop();
     pipe_server.stop();
 
     if (audio_engine_thread.joinable()) {
         audio_engine_thread.join();
     }
+
+    timeEndPeriod(1);
+
 
     std::cout << "[Shutdown] Teardown complete.\n";
     return 0;

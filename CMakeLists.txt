@@ -18,8 +18,10 @@ include_directories(include)
 add_library(metvoice_core STATIC
     src/core/drift_corrector.cpp
     src/core/wasapi_backend.cpp
+    src/core/endpoint_manager.cpp
 )
-target_link_libraries(metvoice_core PUBLIC ole32 avrt ksuser uuid)
+target_link_libraries(metvoice_core PUBLIC ole32 avrt ksuser uuid winmm)
+
 
 # 2. DSP Library
 add_library(metvoice_dsp STATIC
@@ -68,3 +70,6 @@ add_test(NAME TestDrift COMMAND test_drift)
 
 add_executable(benchmark_callback tests/benchmark_callback.cpp)
 target_link_libraries(benchmark_callback PRIVATE metvoice_matrix metvoice_dsp metvoice_core)
+
+add_executable(test_capture_diag tests/test_capture_diag.cpp)
+target_link_libraries(test_capture_diag PRIVATE metvoice_core)

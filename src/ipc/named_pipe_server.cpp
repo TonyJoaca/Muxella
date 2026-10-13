@@ -1,6 +1,7 @@
 #include "metvoice/ipc/named_pipe_server.hpp"
 #include "metvoice/ipc/protocol.hpp"
 #include "metvoice/core/wasapi_backend.hpp"
+#include "metvoice/core/endpoint_manager.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -8,55 +9,11 @@
 
 namespace metvoice::ipc {
 
-namespace {
-    std::string wstring_to_utf8(const std::wstring& wstr) {
-        if (wstr.empty()) return "";
-        int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-        std::string str(size_needed, 0);
-        WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), &str[0], size_needed, nullptr, nullptr);
-        return str;
+std::string CommandDispatcher::serialize_devices_json(core::EndpointManager* ep_mgr) {
+    if (ep_mgr) {
+        return ep_mgr->serialize_devices_json();
     }
-}
-
-std::string CommandDispatcher::serialize_devices_json() {
-    auto captures = core::WasapiEndpoint::enumerate_devices(core::DeviceType::Capture);
-    auto renders = core::WasapiEndpoint::enumerate_devices(core::DeviceType::Render);
-
-    std::ostringstream ss;
-    ss << "{\"type\":\"devices\",\"captures\":[";
-    for (size_t i = 0; i < captures.size(); ++i) {
-        if (i > 0) ss << ",";
-        std::string name = wstring_to_utf8(captures[i].friendly_name);
-        std::string clean_name;
-        for (char c : name) {
-            if (c == '\"' || c == '\\') clean_name += '\\';
-            clean_name += c;
-        }
-        ss << "{\"index\":" << i
-           << ",\"name\":\"" << clean_name << "\""
-           << ",\"default\":" << (captures[i].is_default ? "true" : "false")
-           << ",\"rate\":" << captures[i].default_sample_rate
-           << ",\"channels\":" << captures[i].channels
-           << "}";
-    }
-    ss << "],\"renders\":[";
-    for (size_t j = 0; j < renders.size(); ++j) {
-        if (j > 0) ss << ",";
-        std::string name = wstring_to_utf8(renders[j].friendly_name);
-        std::string clean_name;
-        for (char c : name) {
-            if (c == '\"' || c == '\\') clean_name += '\\';
-            clean_name += c;
-        }
-        ss << "{\"index\":" << j
-           << ",\"name\":\"" << clean_name << "\""
-           << ",\"default\":" << (renders[j].is_default ? "true" : "false")
-           << ",\"rate\":" << renders[j].default_sample_rate
-           << ",\"channels\":" << renders[j].channels
-           << "}";
-    }
-    ss << "]}";
-    return ss.str();
+    return "{\"type\":\"devices\",\"captures\":[],\"renders\":[]}";
 }
 
 std::string CommandDispatcher::serialize_meters_json(const matrix::MixerEngine& engine) {
@@ -101,7 +58,9 @@ std::string CommandDispatcher::serialize_status_json(const matrix::MixerEngine& 
     return ss.str();
 }
 
-std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, const std::string& request) {
+std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine,
+                                               core::EndpointManager* ep_mgr,
+                                               const std::string& request) {
     std::istringstream iss(request);
     std::string cmd;
     iss >> cmd;
@@ -113,7 +72,51 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
         return serialize_status_json(engine) + "\n";
     }
     if (cmd == "devices" || cmd == "GET_DEVICES") {
-        return serialize_devices_json() + "\n";
+        return serialize_devices_json(ep_mgr) + "\n";
+    }
+
+    if (cmd == "attach_input" || cmd == "SET_INPUT") {
+        size_t idx = 0;
+        if (iss >> idx) {
+            std::string query;
+            std::getline(iss, query);
+            while (!query.empty() && (query.front() == ' ' || query.front() == '\t')) query.erase(0, 1);
+            while (!query.empty() && (query.back() == ' ' || query.back() == '\t' || query.back() == '\r' || query.back() == '\n')) query.pop_back();
+            if (ep_mgr && ep_mgr->attach_input(idx, query)) {
+                return "{\"status\":\"ok\",\"strip\":" + std::to_string(idx) + ",\"device\":\"" + query + "\"}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"failed to attach input device\"}\n";
+    }
+
+    if (cmd == "attach_output" || cmd == "SET_OUTPUT") {
+        size_t idx = 0;
+        if (iss >> idx) {
+            std::string query;
+            std::getline(iss, query);
+            while (!query.empty() && (query.front() == ' ' || query.front() == '\t')) query.erase(0, 1);
+            while (!query.empty() && (query.back() == ' ' || query.back() == '\t' || query.back() == '\r' || query.back() == '\n')) query.pop_back();
+            if (ep_mgr && ep_mgr->attach_output(idx, query)) {
+                return "{\"status\":\"ok\",\"bus\":" + std::to_string(idx) + ",\"device\":\"" + query + "\"}\n";
+            }
+        }
+        return "{\"status\":\"error\",\"message\":\"failed to attach output device\"}\n";
+    }
+
+    if (cmd == "detach_input") {
+        size_t idx = 0;
+        if (iss >> idx && ep_mgr) {
+            ep_mgr->detach_input(idx);
+            return "{\"status\":\"ok\",\"strip\":" + std::to_string(idx) + ",\"device\":\"detached\"}\n";
+        }
+    }
+
+    if (cmd == "detach_output") {
+        size_t idx = 0;
+        if (iss >> idx && ep_mgr) {
+            ep_mgr->detach_output(idx);
+            return "{\"status\":\"ok\",\"bus\":" + std::to_string(idx) + ",\"device\":\"detached\"}\n";
+        }
     }
 
     if (cmd == "rename_strip" || cmd == "SET_STRIP_NAME") {
@@ -267,8 +270,10 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, cons
     return "{\"status\":\"error\",\"message\":\"unknown command: " + cmd + "\"}\n";
 }
 
-NamedPipeServer::NamedPipeServer(matrix::MixerEngine& engine, const std::wstring& pipe_name)
-    : engine_(engine), pipe_name_(pipe_name) {
+NamedPipeServer::NamedPipeServer(matrix::MixerEngine& engine,
+                                 core::EndpointManager* ep_mgr,
+                                 const std::wstring& pipe_name)
+    : engine_(engine), ep_mgr_(ep_mgr), pipe_name_(pipe_name) {
 }
 
 NamedPipeServer::~NamedPipeServer() {
@@ -330,7 +335,7 @@ void NamedPipeServer::server_worker_thread() {
                     req.pop_back();
                 }
 
-                std::string resp = CommandDispatcher::execute_command(engine_, req);
+                std::string resp = CommandDispatcher::execute_command(engine_, ep_mgr_, req);
                 DWORD bytesWritten = 0;
                 WriteFile(hPipe, resp.c_str(), static_cast<DWORD>(resp.size()), &bytesWritten, nullptr);
                 FlushFileBuffers(hPipe);

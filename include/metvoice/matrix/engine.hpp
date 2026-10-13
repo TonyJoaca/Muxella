@@ -75,6 +75,9 @@ private:
     // Intermediate interleaved buffers to avoid heap allocs during transfer
     std::vector<float> temp_interleaved_in_;
     std::vector<float> temp_interleaved_out_;
+
+    // Jitter cushion state per strip to prevent partial-block reads & crackling
+    std::vector<bool> strip_primed_;
 };
 
 } // namespace metvoice::matrix

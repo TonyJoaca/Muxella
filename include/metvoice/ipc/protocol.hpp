@@ -5,6 +5,10 @@
 #include <sstream>
 #include <iomanip>
 
+namespace metvoice::core {
+    class EndpointManager;
+}
+
 namespace metvoice::ipc {
 
 /**
@@ -12,11 +16,13 @@ namespace metvoice::ipc {
  */
 class CommandDispatcher {
 public:
-    static std::string execute_command(matrix::MixerEngine& engine, const std::string& request);
+    static std::string execute_command(matrix::MixerEngine& engine,
+                                       core::EndpointManager* ep_mgr,
+                                       const std::string& request);
 
     static std::string serialize_meters_json(const matrix::MixerEngine& engine);
     static std::string serialize_status_json(const matrix::MixerEngine& engine);
-    static std::string serialize_devices_json();
+    static std::string serialize_devices_json(core::EndpointManager* ep_mgr);
 };
 
 } // namespace metvoice::ipc

@@ -138,3 +138,10 @@ class MetVoicePipeClient:
     def rename_bus(self, bus_idx: int, name: str):
         self.send_command(f"rename_bus {bus_idx} {name}")
 
+    def attach_input(self, strip_idx: int, device_query: str):
+        self.send_command(f"attach_input {strip_idx} {device_query}")
+
+    def attach_output(self, bus_idx: int, device_query: str):
+        self.send_command(f"attach_output {bus_idx} {device_query}")
+
+

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "metvoice/matrix/engine.hpp"
+#include "metvoice/core/endpoint_manager.hpp"
 #include <windows.h>
 #include <thread>
 #include <atomic>
@@ -8,13 +9,11 @@
 
 namespace metvoice::ipc {
 
-/**
- * @brief Windows Named Pipe Server (e.g. \\.\pipe\MetVoice_Control)
- * Decoupled from the real-time audio thread. Handles external GUI or CLI commands.
- */
 class NamedPipeServer {
 public:
-    NamedPipeServer(matrix::MixerEngine& engine, const std::wstring& pipe_name = L"\\\\.\\pipe\\MetVoice_Control");
+    NamedPipeServer(matrix::MixerEngine& engine,
+                    core::EndpointManager* ep_mgr = nullptr,
+                    const std::wstring& pipe_name = L"\\\\.\\pipe\\MetVoice_Control");
     ~NamedPipeServer();
 
     bool start();
@@ -26,6 +25,7 @@ private:
     void server_worker_thread();
 
     matrix::MixerEngine& engine_;
+    core::EndpointManager* ep_mgr_{nullptr};
     std::wstring pipe_name_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_signal_{false};

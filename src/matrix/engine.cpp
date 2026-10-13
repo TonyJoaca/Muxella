@@ -8,15 +8,19 @@ MixerEngine::MixerEngine(size_t num_strips, size_t num_buses, size_t max_block_f
       num_buses_(num_buses),
       max_block_frames_(max_block_frames),
       sample_rate_(sample_rate),
-      routing_(num_strips, num_buses) {
+      routing_(num_strips, num_buses),
+      strip_primed_(num_strips, false) {
 
     strips_.reserve(num_strips);
     strip_input_rings_.reserve(num_strips);
     strip_buffers_.reserve(num_strips);
 
+    // 65536 floats (~340ms of 48kHz stereo) ensures plenty of cushion against thread jitter
+    constexpr size_t RING_CAPACITY = 65536;
+
     for (size_t i = 0; i < num_strips; ++i) {
         strips_.push_back(std::make_unique<dsp::DspChannelStrip>("Strip " + std::to_string(i + 1), sample_rate));
-        strip_input_rings_.push_back(std::make_shared<core::SpscRingBuffer<float>>(max_block_frames * 8));
+        strip_input_rings_.push_back(std::make_shared<core::SpscRingBuffer<float>>(RING_CAPACITY));
         strip_buffers_.emplace_back(2, max_block_frames);
     }
 
@@ -26,7 +30,7 @@ MixerEngine::MixerEngine(size_t num_strips, size_t num_buses, size_t max_block_f
 
     for (size_t j = 0; j < num_buses; ++j) {
         buses_.push_back(std::make_unique<dsp::MasterBus>("Bus " + std::to_string(j + 1), sample_rate));
-        bus_output_rings_.push_back(std::make_shared<core::SpscRingBuffer<float>>(max_block_frames * 8));
+        bus_output_rings_.push_back(std::make_shared<core::SpscRingBuffer<float>>(RING_CAPACITY));
         bus_buffers_.emplace_back(2, max_block_frames);
     }
 
@@ -55,18 +59,44 @@ void MixerEngine::process_block(size_t frames) noexcept {
         }
     }
 
-    // 1. Ingest audio into strips and apply per-strip DSP
+    // 1. Ingest audio into strips with jitter cushion and apply per-strip DSP
     for (size_t i = 0; i < num_strips_; ++i) {
         auto& buf = strip_buffers_[i];
         buf.set_frame_count(to_process);
 
         const size_t samples_needed = to_process * 2;
         size_t samples_read = 0;
+
         if (strip_input_rings_[i]) {
-            samples_read = strip_input_rings_[i]->read(temp_interleaved_in_.data(), samples_needed);
+            const size_t avail = strip_input_rings_[i]->available_read();
+            // Cushion threshold: at least 2 full blocks (e.g. 1920 floats = 20ms) before starting playback
+            const size_t cushion_threshold = samples_needed * 2;
+
+            if (!strip_primed_[i]) {
+                if (avail >= cushion_threshold) {
+                    strip_primed_[i] = true;
+                }
+            }
+
+            if (strip_primed_[i]) {
+                if (avail >= samples_needed) {
+                    samples_read = strip_input_rings_[i]->read(temp_interleaved_in_.data(), samples_needed);
+
+                    // Prevent excessive latency buildup (keep buffer under ~60ms)
+                    if (avail > samples_needed * 6) {
+                        size_t excess = std::min(avail - samples_needed * 2, samples_needed);
+                        // Read and discard excess to re-align
+                        strip_input_rings_[i]->read(temp_interleaved_out_.data(), excess);
+                    }
+                } else {
+                    // Starvation detected: drop to silence and wait for cushion to reaccumulate
+                    strip_primed_[i] = false;
+                    samples_read = 0;
+                }
+            }
         }
 
-        // Fill remaining with silence if underrun occurs
+        // Fill remaining with silence if underrun or unprimed
         if (samples_read < samples_needed) {
             std::fill(temp_interleaved_in_.data() + samples_read,
                       temp_interleaved_in_.data() + samples_needed, 0.0f);
