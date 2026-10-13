@@ -152,10 +152,11 @@ int main() {
             auto now = std::chrono::steady_clock::now();
             if (next_tick > now) {
                 std::this_thread::sleep_until(next_tick);
-            } else {
-                // Audio callback overrun / deadline miss detected
+            } else if (now - next_tick > frame_duration * 4) {
+                // Severe lag (system freeze / sleep) - resync to prevent burst processing
                 next_tick = now;
             }
+            // Minor jitter (< 40ms): do not reset next_tick! Process immediately to catch up and prevent DAC starvation!
         }
     });
 

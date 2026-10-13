@@ -493,14 +493,18 @@ void WasapiEndpoint::render_thread_proc() {
 
             size_t samples_read = 0;
             if (ring_buffer_) {
-                size_t avail = ring_buffer_->available_read();
-                if (avail >= stereo_samples_needed) {
-                    samples_read = ring_buffer_->read(stereo_read_buf.data(), stereo_samples_needed);
-                }
+                samples_read = ring_buffer_->read(stereo_read_buf.data(), stereo_samples_needed);
             }
 
             if (samples_read < stereo_samples_needed) {
-                std::fill(stereo_read_buf.data() + samples_read, stereo_read_buf.data() + stereo_samples_needed, 0.0f);
+                float last_l = (samples_read >= 2) ? stereo_read_buf[samples_read - 2] : 0.0f;
+                float last_r = (samples_read >= 2) ? stereo_read_buf[samples_read - 1] : 0.0f;
+                for (size_t s = samples_read; s < stereo_samples_needed; s += 2) {
+                    last_l *= 0.95f;
+                    last_r *= 0.95f;
+                    stereo_read_buf[s] = last_l;
+                    stereo_read_buf[s + 1] = last_r;
+                }
             }
 
             auto write_sample = [&](size_t offset, float val) {

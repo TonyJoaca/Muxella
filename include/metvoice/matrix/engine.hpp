@@ -78,6 +78,11 @@ private:
 
     // Jitter cushion state per strip to prevent partial-block reads & crackling
     std::vector<bool> strip_primed_;
+
+    // Closed-loop PI clock drift correctors per strip
+    std::vector<std::unique_ptr<core::ClockDriftCorrector>> drift_correctors_;
+    std::vector<float> drift_in_planar_l_;
+    std::vector<float> drift_in_planar_r_;
 };
 
 } // namespace metvoice::matrix

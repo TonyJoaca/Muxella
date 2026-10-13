@@ -138,6 +138,30 @@ public:
     }
 
     /**
+     * @brief Peek elements without advancing the read position (Consumer thread only).
+     */
+    size_t peek(T* dst, size_t count) const noexcept {
+        if (count == 0 || dst == nullptr) return 0;
+
+        const size_t w = write_pos_.load(std::memory_order_acquire);
+        const size_t r = read_pos_.load(std::memory_order_relaxed);
+        const size_t available = w - r;
+
+        const size_t to_read = std::min(count, available);
+        if (to_read == 0) return 0;
+
+        const size_t start_idx = r & mask_;
+        const size_t first_chunk = std::min(to_read, capacity_ - start_idx);
+        const size_t second_chunk = to_read - first_chunk;
+
+        std::memcpy(dst, &storage_[start_idx], first_chunk * sizeof(T));
+        if (second_chunk > 0) {
+            std::memcpy(dst + first_chunk, &storage_[0], second_chunk * sizeof(T));
+        }
+        return to_read;
+    }
+
+    /**
      * @brief Discard unread samples to catch up if latency grows too high.
      */
     size_t discard(size_t count) noexcept {

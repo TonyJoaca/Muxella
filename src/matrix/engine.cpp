@@ -22,6 +22,7 @@ MixerEngine::MixerEngine(size_t num_strips, size_t num_buses, size_t max_block_f
         strips_.push_back(std::make_unique<dsp::DspChannelStrip>("Strip " + std::to_string(i + 1), sample_rate));
         strip_input_rings_.push_back(std::make_shared<core::SpscRingBuffer<float>>(RING_CAPACITY));
         strip_buffers_.emplace_back(2, max_block_frames);
+        drift_correctors_.push_back(std::make_unique<core::ClockDriftCorrector>(2, 2048));
     }
 
     buses_.reserve(num_buses);
@@ -34,8 +35,10 @@ MixerEngine::MixerEngine(size_t num_strips, size_t num_buses, size_t max_block_f
         bus_buffers_.emplace_back(2, max_block_frames);
     }
 
-    temp_interleaved_in_.resize(max_block_frames * 2, 0.0f);
-    temp_interleaved_out_.resize(max_block_frames * 2, 0.0f);
+    temp_interleaved_in_.resize((max_block_frames + 64) * 2, 0.0f);
+    temp_interleaved_out_.resize((max_block_frames + 64) * 2, 0.0f);
+    drift_in_planar_l_.resize(max_block_frames + 64, 0.0f);
+    drift_in_planar_r_.resize(max_block_frames + 64, 0.0f);
 }
 
 void MixerEngine::set_strip_name(size_t idx, const std::string& name) {
@@ -59,50 +62,70 @@ void MixerEngine::process_block(size_t frames) noexcept {
         }
     }
 
-    // 1. Ingest audio into strips with jitter cushion and apply per-strip DSP
+    // 1. Ingest audio into strips with closed-loop drift correction and per-strip DSP
     for (size_t i = 0; i < num_strips_; ++i) {
         auto& buf = strip_buffers_[i];
         buf.set_frame_count(to_process);
 
-        const size_t samples_needed = to_process * 2;
-        size_t samples_read = 0;
-
         if (strip_input_rings_[i]) {
             const size_t avail = strip_input_rings_[i]->available_read();
-            // Cushion threshold: at least 2 full blocks (e.g. 1920 floats = 20ms) before starting playback
-            const size_t cushion_threshold = samples_needed * 2;
+            constexpr size_t TARGET_CUSHION = 2048; // ~21ms at 48kHz stereo cushion
 
             if (!strip_primed_[i]) {
-                if (avail >= cushion_threshold) {
+                if (avail >= TARGET_CUSHION) {
                     strip_primed_[i] = true;
+                    drift_correctors_[i]->reset(TARGET_CUSHION);
                 }
             }
 
             if (strip_primed_[i]) {
-                if (avail >= samples_needed) {
-                    samples_read = strip_input_rings_[i]->read(temp_interleaved_in_.data(), samples_needed);
+                drift_correctors_[i]->update_feedback(avail);
 
-                    // Prevent excessive latency buildup (keep buffer under ~60ms)
-                    if (avail > samples_needed * 6) {
-                        size_t excess = std::min(avail - samples_needed * 2, samples_needed);
-                        // Read and discard excess to re-align
-                        strip_input_rings_[i]->read(temp_interleaved_out_.data(), excess);
+                // We peek up to (to_process + 16) frames to supply the fractional spline resampler
+                const size_t req_frames = to_process + 16;
+                const size_t max_peek_floats = std::min(avail, req_frames * 2);
+
+                if (max_peek_floats >= 8) {
+                    const size_t peeked_floats = strip_input_rings_[i]->peek(temp_interleaved_in_.data(), max_peek_floats);
+                    const size_t in_frames = peeked_floats / 2;
+
+                    for (size_t f = 0; f < in_frames; ++f) {
+                        drift_in_planar_l_[f] = temp_interleaved_in_[f * 2 + 0];
+                        drift_in_planar_r_[f] = temp_interleaved_in_[f * 2 + 1];
+                    }
+
+                    const float* in_ptrs[2] = {drift_in_planar_l_.data(), drift_in_planar_r_.data()};
+                    float* out_ptrs[2] = {buf.channel_data(0), buf.channel_data(1)};
+
+                    size_t frames_consumed = 0;
+                    size_t generated = drift_correctors_[i]->process(in_ptrs, in_frames, out_ptrs, to_process, frames_consumed);
+
+                    // Advance ring buffer strictly by consumed frames
+                    strip_input_rings_[i]->discard(frames_consumed * 2);
+
+                    if (generated < to_process) {
+                        // Soft extrapolation / decay on minor jitter underrun instead of click
+                        float last_l = (generated > 0) ? out_ptrs[0][generated - 1] : 0.0f;
+                        float last_r = (generated > 0) ? out_ptrs[1][generated - 1] : 0.0f;
+                        for (size_t f = generated; f < to_process; ++f) {
+                            last_l *= 0.95f;
+                            last_r *= 0.95f;
+                            out_ptrs[0][f] = last_l;
+                            out_ptrs[1][f] = last_r;
+                        }
                     }
                 } else {
-                    // Starvation detected: drop to silence and wait for cushion to reaccumulate
+                    // Buffer drained: unprime and softly clear
                     strip_primed_[i] = false;
-                    samples_read = 0;
+                    buf.clear_frames();
                 }
+            } else {
+                buf.clear_frames();
             }
+        } else {
+            buf.clear_frames();
         }
 
-        // Fill remaining with silence if underrun or unprimed
-        if (samples_read < samples_needed) {
-            std::fill(temp_interleaved_in_.data() + samples_read,
-                      temp_interleaved_in_.data() + samples_needed, 0.0f);
-        }
-
-        buf.deinterleave_from(temp_interleaved_in_.data(), to_process, 2);
         strips_[i]->process(buf);
     }
 
