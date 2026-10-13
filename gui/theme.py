@@ -7,8 +7,9 @@ ACCENT_PURPLE = "#b829ea"
 ACCENT_GREEN = "#00ff66"
 BG_BLACK = "#050208"
 SURFACE_CARD = "#0d0514"
-BORDER_OUTLINE = "#8a1ec4"
-BORDER_SUBTLE = "#43125e"
+BORDER_OUTLINE = "#6b1a94"
+BORDER_SUBTLE = "#2c0940"
+SURFACE_CARD = "#08030f"
 
 def load_fonts() -> str:
     font_path = Path(__file__).resolve().parent.parent / "res" / "fonts" / "sonic-1-hud-font.otf"
@@ -44,7 +45,7 @@ def apply_accela_theme(app: QApplication) -> str:
     stylesheet = f"""
     * {{
         font-family: '{font_family}', 'Consolas', monospace;
-        font-size: 10pt;
+        font-size: 9pt;
     }}
 
     QMainWindow, QDialog, QWidget#CentralWidget {{
@@ -52,11 +53,18 @@ def apply_accela_theme(app: QApplication) -> str:
         color: {ACCENT_PURPLE};
     }}
 
-    QFrame, QGroupBox {{
+    QLabel {{
+        background: transparent;
+        border: none;
+        margin: 0px;
+        padding: 0px;
+    }}
+
+    QGroupBox {{
         background-color: {SURFACE_CARD};
-        border: 1.5px solid {BORDER_OUTLINE};
+        border: 1px solid {BORDER_SUBTLE};
         border-radius: 0px;
-        margin-top: 6px;
+        margin-top: 2px;
     }}
 
     QGroupBox::title {{

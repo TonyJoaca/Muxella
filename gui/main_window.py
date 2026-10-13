@@ -66,14 +66,14 @@ class DeviceSelectorButton(QPushButton):
         self.get_devices_func = get_devices_func
         self.on_selected_func = on_selected_func
 
-        self.setFixedHeight(22)
+        self.setFixedHeight(20)
         self.setStyleSheet("""
             QPushButton {
                 background-color: #0b0214;
                 color: #b829ea;
-                border: 1px solid #7b29a8;
-                font-size: 7.5pt;
-                padding: 2px 4px;
+                border: 1px solid #4a1469;
+                font-size: 7pt;
+                padding: 1px 3px;
                 text-align: center;
             }
             QPushButton:hover {
@@ -176,18 +176,21 @@ class PhysicalInputStrip(QFrame):
         self.get_devices_func = get_devices_func
         self.log_callback = log_callback
 
-        self.setFixedWidth(138)
+        self.setFixedWidth(114)
         self.setFrameShape(QFrame.Shape.Box)
-        self.setStyleSheet(f"""
-            PhysicalInputStrip {{
-                background-color: #08020e;
-                border: 1.5px solid {BORDER_OUTLINE};
-            }}
+        self.setStyleSheet("""
+            PhysicalInputStrip {
+                background-color: #06020c;
+                border: 1px solid #300d47;
+            }
+            PhysicalInputStrip:hover {
+                border: 1px solid #6b1f94;
+            }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 4, 2, 4)
+        layout.setSpacing(3)
 
         # 1. Editable Title
         self.title_edit = EditableTitle(default_title, self._on_title_edited, ACCENT_PURPLE, self)
@@ -202,7 +205,7 @@ class PhysicalInputStrip(QFrame):
 
         # 3. FX Knobs Row (Comp, Gate, Denoiser)
         knobs_box = QHBoxLayout()
-        knobs_box.setSpacing(2)
+        knobs_box.setSpacing(1)
 
         self.comp_knob = BlockyKnob("COMP", 0.0, 10.0, 0.0, step=0.1, parent=self)
         self.comp_knob.valueChanged.connect(lambda v: self.client.set_comp(self.strip_id, v))
@@ -217,7 +220,7 @@ class PhysicalInputStrip(QFrame):
 
         # FX Sends (Reverb & Delay)
         fx_box = QHBoxLayout()
-        fx_box.setSpacing(2)
+        fx_box.setSpacing(1)
         self.rev_knob = BlockyKnob("REVERB", 0.0, 10.0, 0.0, step=0.1, parent=self)
         self.delay_knob = BlockyKnob("DELAY", 0.0, 10.0, 0.0, step=0.1, parent=self)
         fx_box.addWidget(self.rev_knob)
@@ -226,9 +229,9 @@ class PhysicalInputStrip(QFrame):
 
         # 4. Routing Grid [A1..A5] and [B1..B3]
         route_group = QGroupBox("BUS ROUTING")
-        route_group.setStyleSheet(f"QGroupBox {{ font-size: 7.5pt; border: 1px solid #4a1469; margin-top: 4px; }}")
+        route_group.setStyleSheet("QGroupBox { font-size: 7pt; border: 1px solid #300d47; margin-top: 3px; }")
         route_grid = QGridLayout(route_group)
-        route_grid.setContentsMargins(2, 6, 2, 2)
+        route_grid.setContentsMargins(1, 4, 1, 2)
         route_grid.setSpacing(2)
 
         self.route_buttons: List[QPushButton] = []
@@ -237,12 +240,12 @@ class PhysicalInputStrip(QFrame):
         for b_idx, b_name in enumerate(bus_names):
             btn = QPushButton(b_name)
             btn.setCheckable(True)
-            btn.setFixedSize(27, 20)
+            btn.setFixedSize(24, 18)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    font-size: 7.5pt; padding: 0px;
-                    border: 1px solid #6b1f94;
-                    background-color: #0f041a;
+                    font-size: 7pt; padding: 0px;
+                    border: 1px solid #4a1469;
+                    background-color: #0b0214;
                     color: #b829ea;
                 }}
                 QPushButton:checked {{
@@ -268,13 +271,13 @@ class PhysicalInputStrip(QFrame):
 
         # 5. Fader & Meter Section
         fader_row = QHBoxLayout()
-        fader_row.setSpacing(6)
+        fader_row.setSpacing(3)
 
         self.meter = BlockyVuMeter(self)
         fader_row.addWidget(self.meter)
 
         fader_col = QVBoxLayout()
-        fader_col.setSpacing(2)
+        fader_col.setSpacing(1)
 
         self.fader = QSlider(Qt.Orientation.Vertical)
         self.fader.setRange(-600, 120)
@@ -283,7 +286,7 @@ class PhysicalInputStrip(QFrame):
         fader_col.addWidget(self.fader, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.gain_lbl = QLabel("0.0 dB")
-        self.gain_lbl.setStyleSheet("color: #e074ff; font-size: 8pt; font-weight: bold;")
+        self.gain_lbl.setStyleSheet("color: #e074ff; font-size: 7.5pt; font-weight: bold;")
         self.gain_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fader_col.addWidget(self.gain_lbl)
 
@@ -299,12 +302,14 @@ class PhysicalInputStrip(QFrame):
 
         self.mono_btn = QPushButton("MONO")
         self.mono_btn.setCheckable(True)
-        self.mono_btn.setFixedHeight(22)
+        self.mono_btn.setFixedHeight(18)
+        self.mono_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         sub_row.addWidget(self.mono_btn)
 
         self.solo_btn = QPushButton("SOLO")
         self.solo_btn.setCheckable(True)
-        self.solo_btn.setFixedHeight(22)
+        self.solo_btn.setFixedHeight(18)
+        self.solo_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         self.solo_btn.clicked.connect(self._on_solo_clicked)
         sub_row.addWidget(self.solo_btn)
 
@@ -312,7 +317,8 @@ class PhysicalInputStrip(QFrame):
 
         self.mute_btn = QPushButton("MUTE")
         self.mute_btn.setCheckable(True)
-        self.mute_btn.setFixedHeight(24)
+        self.mute_btn.setFixedHeight(20)
+        self.mute_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         self.mute_btn.clicked.connect(self._on_mute_clicked)
         toggles_layout.addWidget(self.mute_btn)
 
@@ -376,31 +382,34 @@ class VirtualInputStrip(QFrame):
         self.client = client
         self.log_callback = log_callback
 
-        self.setFixedWidth(145)
+        self.setFixedWidth(114)
         self.setFrameShape(QFrame.Shape.Box)
-        self.setStyleSheet(f"""
-            VirtualInputStrip {{
-                background-color: #06020c;
-                border: 1.5px solid #a855f7;
-            }}
+        self.setStyleSheet("""
+            VirtualInputStrip {
+                background-color: #040906;
+                border: 1px solid #143820;
+            }
+            VirtualInputStrip:hover {
+                border: 1px solid #00aa44;
+            }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 4, 2, 4)
+        layout.setSpacing(3)
 
         # 1. Editable Title
         self.title_edit = EditableTitle(default_title, self._on_title_edited, ACCENT_GREEN, self)
         layout.addWidget(self.title_edit)
 
         sub_lbl = QLabel(subtitle)
-        sub_lbl.setStyleSheet("color: #7b29a8; font-size: 7pt;")
+        sub_lbl.setStyleSheet("color: #7b29a8; font-size: 6.5pt;")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(sub_lbl)
 
         # 2. 3-Band Parametric EQ Knobs (Treble, Mid, Bass)
         eq_box = QHBoxLayout()
-        eq_box.setSpacing(2)
+        eq_box.setSpacing(1)
 
         self.bass_knob = BlockyKnob("BASS", -12.0, 12.0, 0.0, step=0.5, unit="dB", parent=self)
         self.bass_knob.valueChanged.connect(self._on_eq_changed)
@@ -419,13 +428,13 @@ class VirtualInputStrip(QFrame):
         # Balance / Pan Slider
         pan_row = QHBoxLayout()
         pan_lbl_l = QLabel("L")
-        pan_lbl_l.setStyleSheet("color: #7b29a8; font-size: 7.5pt;")
+        pan_lbl_l.setStyleSheet("color: #7b29a8; font-size: 7pt;")
         self.pan_slider = QSlider(Qt.Orientation.Horizontal)
         self.pan_slider.setRange(-100, 100)
         self.pan_slider.setValue(0)
         self.pan_slider.valueChanged.connect(lambda v: self.client.set_pan(self.strip_id, v / 100.0))
         pan_lbl_r = QLabel("R")
-        pan_lbl_r.setStyleSheet("color: #7b29a8; font-size: 7.5pt;")
+        pan_lbl_r.setStyleSheet("color: #7b29a8; font-size: 7pt;")
 
         pan_row.addWidget(pan_lbl_l)
         pan_row.addWidget(self.pan_slider)
@@ -434,9 +443,9 @@ class VirtualInputStrip(QFrame):
 
         # 3. Routing Grid [A1..A5] and [B1..B3]
         route_group = QGroupBox("BUS ROUTING")
-        route_group.setStyleSheet(f"QGroupBox {{ font-size: 7.5pt; border: 1px solid #4a1469; margin-top: 4px; }}")
+        route_group.setStyleSheet("QGroupBox { font-size: 7pt; border: 1px solid #143820; margin-top: 3px; }")
         route_grid = QGridLayout(route_group)
-        route_grid.setContentsMargins(2, 6, 2, 2)
+        route_grid.setContentsMargins(1, 4, 1, 2)
         route_grid.setSpacing(2)
 
         self.route_buttons: List[QPushButton] = []
@@ -445,13 +454,13 @@ class VirtualInputStrip(QFrame):
         for b_idx, b_name in enumerate(bus_names):
             btn = QPushButton(b_name)
             btn.setCheckable(True)
-            btn.setFixedSize(28, 20)
+            btn.setFixedSize(24, 18)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    font-size: 7.5pt; padding: 0px;
-                    border: 1px solid #6b1f94;
-                    background-color: #0f041a;
-                    color: #b829ea;
+                    font-size: 7pt; padding: 0px;
+                    border: 1px solid #144d28;
+                    background-color: #041007;
+                    color: #00ff66;
                 }}
                 QPushButton:checked {{
                     border: 1.5px solid {ACCENT_GREEN};
@@ -476,13 +485,13 @@ class VirtualInputStrip(QFrame):
 
         # 4. Fader & Meter Section
         fader_row = QHBoxLayout()
-        fader_row.setSpacing(6)
+        fader_row.setSpacing(3)
 
         self.meter = BlockyVuMeter(self)
         fader_row.addWidget(self.meter)
 
         fader_col = QVBoxLayout()
-        fader_col.setSpacing(2)
+        fader_col.setSpacing(1)
 
         self.fader = QSlider(Qt.Orientation.Vertical)
         self.fader.setRange(-600, 120)
@@ -491,7 +500,7 @@ class VirtualInputStrip(QFrame):
         fader_col.addWidget(self.fader, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.gain_lbl = QLabel("0.0 dB")
-        self.gain_lbl.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 8pt; font-weight: bold;")
+        self.gain_lbl.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 7.5pt; font-weight: bold;")
         self.gain_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fader_col.addWidget(self.gain_lbl)
 
@@ -507,12 +516,14 @@ class VirtualInputStrip(QFrame):
 
         self.mc_btn = QPushButton("M.C")
         self.mc_btn.setCheckable(True)
-        self.mc_btn.setFixedHeight(22)
+        self.mc_btn.setFixedHeight(18)
+        self.mc_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         sub_row.addWidget(self.mc_btn)
 
         self.solo_btn = QPushButton("SOLO")
         self.solo_btn.setCheckable(True)
-        self.solo_btn.setFixedHeight(22)
+        self.solo_btn.setFixedHeight(18)
+        self.solo_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         self.solo_btn.clicked.connect(self._on_solo_clicked)
         sub_row.addWidget(self.solo_btn)
 
@@ -520,7 +531,8 @@ class VirtualInputStrip(QFrame):
 
         self.mute_btn = QPushButton("MUTE")
         self.mute_btn.setCheckable(True)
-        self.mute_btn.setFixedHeight(24)
+        self.mute_btn.setFixedHeight(20)
+        self.mute_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         self.mute_btn.clicked.connect(self._on_mute_clicked)
         toggles_layout.addWidget(self.mute_btn)
 
@@ -585,27 +597,32 @@ class MasterBusStrip(QFrame):
         self.get_devices_func = get_devices_func
         self.log_callback = log_callback
 
-        self.setFixedWidth(112)
+        self.setFixedWidth(88)
         self.setFrameShape(QFrame.Shape.Box)
-        border_col = "#00ff66" if is_virtual else "#a855f7"
+        border_col = "#144d28" if is_virtual else "#300d47"
+        hover_col = "#00ff66" if is_virtual else "#6b1f94"
+        text_col = "#00ff66" if is_virtual else "#b829ea"
         self.setStyleSheet(f"""
             MasterBusStrip {{
-                background-color: #06020c;
-                border: 1.5px solid {border_col};
+                background-color: #05010a;
+                border: 1px solid {border_col};
+            }}
+            MasterBusStrip:hover {{
+                border: 1px solid {hover_col};
             }}
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 6, 4, 6)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 4, 2, 4)
+        layout.setSpacing(3)
 
         # 1. Bus Tag & Editable Name
         code_lbl = QLabel(f"[{bus_code}]")
-        code_lbl.setStyleSheet(f"color: {border_col}; font-weight: bold; font-size: 9pt;")
+        code_lbl.setStyleSheet(f"color: {text_col}; font-weight: bold; font-size: 8pt;")
         code_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(code_lbl)
 
-        self.title_edit = EditableTitle(default_name, self._on_title_edited, border_col, self)
+        self.title_edit = EditableTitle(default_name, self._on_title_edited, text_col, self)
         layout.addWidget(self.title_edit)
 
         # 2. Clickable Hardware Out Dropdown for physical buses A1..A5
@@ -617,7 +634,7 @@ class MasterBusStrip(QFrame):
             layout.addWidget(self.dev_btn)
         else:
             virt_lbl = QLabel("VIRTUAL BUS")
-            virt_lbl.setStyleSheet("color: #00aa44; font-size: 7.5pt;")
+            virt_lbl.setStyleSheet("color: #00aa44; font-size: 7pt;")
             virt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(virt_lbl)
 
@@ -627,24 +644,26 @@ class MasterBusStrip(QFrame):
 
         mono_btn = QPushButton("MONO")
         mono_btn.setCheckable(True)
-        mono_btn.setFixedHeight(20)
+        mono_btn.setFixedHeight(18)
+        mono_btn.setStyleSheet("font-size: 6.5pt; padding: 1px;")
         mode_box.addWidget(mono_btn)
 
         eq_btn = QPushButton("EQ")
         eq_btn.setCheckable(True)
-        eq_btn.setFixedHeight(20)
+        eq_btn.setFixedHeight(18)
+        eq_btn.setStyleSheet("font-size: 6.5pt; padding: 1px;")
         mode_box.addWidget(eq_btn)
         layout.addLayout(mode_box)
 
         # 4. Meter + Fader
         fader_row = QHBoxLayout()
-        fader_row.setSpacing(4)
+        fader_row.setSpacing(2)
 
         self.meter = BlockyVuMeter(self)
         fader_row.addWidget(self.meter)
 
         fader_col = QVBoxLayout()
-        fader_col.setSpacing(2)
+        fader_col.setSpacing(1)
 
         self.fader = QSlider(Qt.Orientation.Vertical)
         self.fader.setRange(-600, 120)
@@ -653,7 +672,7 @@ class MasterBusStrip(QFrame):
         fader_col.addWidget(self.fader, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.gain_lbl = QLabel("0.0 dB")
-        self.gain_lbl.setStyleSheet(f"color: {border_col}; font-size: 7.5pt; font-weight: bold;")
+        self.gain_lbl.setStyleSheet(f"color: {text_col}; font-size: 7pt; font-weight: bold;")
         self.gain_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fader_col.addWidget(self.gain_lbl)
 
@@ -664,14 +683,14 @@ class MasterBusStrip(QFrame):
         self.mute_btn = QPushButton("MUTE")
         self.mute_btn.setCheckable(True)
         self.mute_btn.setChecked(True)
-        self.mute_btn.setStyleSheet("background-color: #ff1a53; color: #ffffff; border: 1.5px solid #ff1a53; font-weight: bold;")
-        self.mute_btn.setFixedHeight(24)
+        self.mute_btn.setStyleSheet("background-color: #ff1a53; color: #ffffff; border: 1px solid #ff1a53; font-weight: bold; font-size: 7pt;")
+        self.mute_btn.setFixedHeight(20)
         self.mute_btn.clicked.connect(self._on_mute_clicked)
         layout.addWidget(self.mute_btn)
 
         # 6. Limiter indicator
         limiter_badge = QLabel("● LIMITER")
-        limiter_badge.setStyleSheet(f"color: {border_col}; font-size: 7pt; border: 1px solid {border_col}; padding: 1px;")
+        limiter_badge.setStyleSheet(f"color: {text_col}; font-size: 6.5pt; border: 1px solid {border_col}; padding: 0px;")
         limiter_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(limiter_badge)
 
@@ -696,9 +715,9 @@ class MasterBusStrip(QFrame):
 
     def _on_mute_clicked(self, checked: bool):
         if checked:
-            self.mute_btn.setStyleSheet("background-color: #ff1a53; color: #ffffff; border: 1.5px solid #ff1a53; font-weight: bold;")
+            self.mute_btn.setStyleSheet("background-color: #ff1a53; color: #ffffff; border: 1px solid #ff1a53; font-weight: bold; font-size: 7pt;")
         else:
-            self.mute_btn.setStyleSheet("")
+            self.mute_btn.setStyleSheet("font-size: 7pt; padding: 1px;")
         self.client.set_bus_mute(self.bus_id, checked)
         self.log_callback(f"Master Bus {self.bus_code} Mute: {checked}")
 
@@ -707,7 +726,7 @@ class MetVoiceMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("METVOICE // CYBER AUDIO MATRIX ROUTER [POTATO CONSOLE]")
-        self.resize(1440, 840)
+        self.resize(1640, 840)
 
         self.client = MetVoicePipeClient()
         self.engine_process = None
@@ -750,17 +769,17 @@ class MetVoiceMainWindow(QMainWindow):
     def _sync_device_buttons(self, devs: Dict[str, Any]):
         attached_inputs = devs.get("attached_inputs", [])
         for idx, dev_name in enumerate(attached_inputs):
-            if hasattr(self, "strips") and idx < len(self.strips) and dev_name and dev_name != "None":
+            if hasattr(self, "physical_strips") and idx < len(self.physical_strips) and dev_name and dev_name != "None":
                 short = dev_name.replace("[WDM] ", "").strip()
-                display = (short[:15] + "..") if len(short) > 17 else short
-                self.strips[idx].dev_btn.setText(f"{display} ▾")
+                display = (short[:13] + "..") if len(short) > 15 else short
+                self.physical_strips[idx].dev_btn.setText(f"{display} ▾")
 
         attached_outputs = devs.get("attached_outputs", [])
         for idx, dev_name in enumerate(attached_outputs):
-            if hasattr(self, "buses") and idx < len(self.buses) and hasattr(self.buses[idx], "dev_btn") and dev_name and dev_name != "None":
+            if hasattr(self, "master_buses") and idx < len(self.master_buses) and hasattr(self.master_buses[idx], "dev_btn") and dev_name and dev_name != "None":
                 short = dev_name.replace("[WDM] ", "").strip()
-                display = (short[:15] + "..") if len(short) > 17 else short
-                self.buses[idx].dev_btn.setText(f"{display} ▾")
+                display = (short[:11] + "..") if len(short) > 13 else short
+                self.master_buses[idx].dev_btn.setText(f"{display} ▾")
 
     def _get_devices(self) -> Optional[Dict[str, Any]]:
         fresh = self.client.get_devices()
@@ -833,12 +852,25 @@ class MetVoiceMainWindow(QMainWindow):
 
         # A. 5 PHYSICAL INPUT STRIPS
         phys_box = QVBoxLayout()
-        phys_hdr = QLabel("PHYSICAL INPUTS (1..5) - [CLICK DEVICE TO SELECT]")
-        phys_hdr.setStyleSheet(f"color: {ACCENT_PURPLE}; font-size: 8pt; font-weight: bold;")
-        phys_box.addWidget(phys_hdr)
+        phys_box.setSpacing(4)
+        phys_hdr = QLabel("PHYSICAL INPUTS (1..5)")
+        phys_hdr.setFixedHeight(20)
+        phys_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        phys_hdr.setStyleSheet(f"""
+            QLabel {{
+                background-color: #0b0214;
+                color: {ACCENT_PURPLE};
+                border: 1px solid #300d47;
+                font-size: 7pt;
+                font-weight: bold;
+                letter-spacing: 1px;
+                padding: 1px 4px;
+            }}
+        """)
+        phys_box.addWidget(phys_hdr, stretch=0)
 
         phys_strips_row = QHBoxLayout()
-        phys_strips_row.setSpacing(6)
+        phys_strips_row.setSpacing(4)
         self.physical_strips: List[PhysicalInputStrip] = []
 
         phys_configs = [
@@ -854,23 +886,36 @@ class MetVoiceMainWindow(QMainWindow):
             self.physical_strips.append(strip)
             phys_strips_row.addWidget(strip)
 
-        phys_box.addLayout(phys_strips_row)
+        phys_box.addLayout(phys_strips_row, stretch=1)
         desk_layout.addLayout(phys_box)
 
         # Separator VLine
         sep1 = QFrame()
         sep1.setFrameShape(QFrame.Shape.VLine)
-        sep1.setStyleSheet("color: #4a1469;")
+        sep1.setStyleSheet("color: #2c0940;")
         desk_layout.addWidget(sep1)
 
         # B. 3 VIRTUAL INPUT STRIPS (VAIO 1..3)
         virt_box = QVBoxLayout()
-        virt_hdr = QLabel("VIRTUAL INPUTS (VAIO 1..3) - [CLICK TITLE TO RENAME]")
-        virt_hdr.setStyleSheet(f"color: {ACCENT_GREEN}; font-size: 8pt; font-weight: bold;")
-        virt_box.addWidget(virt_hdr)
+        virt_box.setSpacing(4)
+        virt_hdr = QLabel("VIRTUAL INPUTS (VAIO 1..3)")
+        virt_hdr.setFixedHeight(20)
+        virt_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        virt_hdr.setStyleSheet(f"""
+            QLabel {{
+                background-color: #031207;
+                color: {ACCENT_GREEN};
+                border: 1px solid #143820;
+                font-size: 7pt;
+                font-weight: bold;
+                letter-spacing: 1px;
+                padding: 1px 4px;
+            }}
+        """)
+        virt_box.addWidget(virt_hdr, stretch=0)
 
         virt_strips_row = QHBoxLayout()
-        virt_strips_row.setSpacing(6)
+        virt_strips_row.setSpacing(4)
         self.virtual_strips: List[VirtualInputStrip] = []
 
         virt_configs = [
@@ -884,23 +929,36 @@ class MetVoiceMainWindow(QMainWindow):
             self.virtual_strips.append(strip)
             virt_strips_row.addWidget(strip)
 
-        virt_box.addLayout(virt_strips_row)
+        virt_box.addLayout(virt_strips_row, stretch=1)
         desk_layout.addLayout(virt_box)
 
         # Separator VLine
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.VLine)
-        sep2.setStyleSheet("color: #4a1469;")
+        sep2.setStyleSheet("color: #2c0940;")
         desk_layout.addWidget(sep2)
 
         # C. 8 MASTER OUTPUT BUSES (A1..A5 Physical + B1..B3 Virtual)
         master_box = QVBoxLayout()
-        master_hdr = QLabel("MASTER OUTPUT BUSES (A1..A5 HARDWARE OUT / B1..B3 VIRTUAL)")
-        master_hdr.setStyleSheet("color: #a855f7; font-size: 8pt; font-weight: bold;")
-        master_box.addWidget(master_hdr)
+        master_box.setSpacing(4)
+        master_hdr = QLabel("MASTER BUSES (A1..A5 / B1..B3)")
+        master_hdr.setFixedHeight(20)
+        master_hdr.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        master_hdr.setStyleSheet("""
+            QLabel {{
+                background-color: #0b0214;
+                color: #b829ea;
+                border: 1px solid #300d47;
+                font-size: 7pt;
+                font-weight: bold;
+                letter-spacing: 1px;
+                padding: 1px 4px;
+            }}
+        """)
+        master_box.addWidget(master_hdr, stretch=0)
 
         master_strips_row = QHBoxLayout()
-        master_strips_row.setSpacing(6)
+        master_strips_row.setSpacing(4)
         self.master_buses: List[MasterBusStrip] = []
 
         bus_configs = [
@@ -919,7 +977,7 @@ class MetVoiceMainWindow(QMainWindow):
             self.master_buses.append(bus_strip)
             master_strips_row.addWidget(bus_strip)
 
-        master_box.addLayout(master_strips_row)
+        master_box.addLayout(master_strips_row, stretch=1)
         desk_layout.addLayout(master_box)
 
         scroll_area.setWidget(desk_widget)
