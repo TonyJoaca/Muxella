@@ -12,7 +12,7 @@ os.environ['PATH'] = os.pathsep.join(
 a = Analysis(
     ['muxella_gui.py'],
     pathex=[],
-    binaries=[('build/metvoice_server.exe', '.'), ('build/muxella_cables.exe', '.')],
+    binaries=[('build/muxella_server.exe', '.'), ('build/muxella_cables.exe', '.')],
     datas=[('res', 'res'), ('virtual_audio/LICENSE.txt', 'licenses/virtual_audio'),
            ('third_party/nlohmann/LICENSE.MIT', 'licenses/nlohmann')],
     hiddenimports=[],

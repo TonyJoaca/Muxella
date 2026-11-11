@@ -1925,14 +1925,14 @@ class MuxellaMainWindow(QMainWindow):
         if getattr(sys, 'frozen', False):
             meipass = getattr(sys, '_MEIPASS', None)
             if meipass:
-                candidate = Path(meipass) / "metvoice_server.exe"
+                candidate = Path(meipass) / "muxella_server.exe"
                 if candidate.exists():
                     return candidate
-            candidate = Path(sys.executable).parent / "metvoice_server.exe"
+            candidate = Path(sys.executable).parent / "muxella_server.exe"
             if candidate.exists():
                 return candidate
         root_dir = Path(__file__).resolve().parent.parent
-        for rel in ["build/metvoice_server.exe", "metvoice_server.exe", "build/Release/metvoice_server.exe"]:
+        for rel in ["build/muxella_server.exe", "muxella_server.exe", "build/Release/muxella_server.exe"]:
             candidate = root_dir / rel
             if candidate.exists():
                 return candidate

@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 echo [1/2] Compiling C++ High-Performance Audio Engine and Virtual Audio Host...
-cmake --build build --config Release --target metvoice_server muxella_cables
+cmake --build build --config Release --target muxella_server muxella_cables
 if %errorlevel% neq 0 (
     echo Error during C++ compilation!
     exit /b %errorlevel%

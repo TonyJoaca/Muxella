@@ -54,8 +54,8 @@ add_library(metvoice_ipc STATIC
 target_link_libraries(metvoice_ipc PUBLIC metvoice_matrix)
 
 # 5. Main Audio Engine Executable
-add_executable(metvoice_server src/main.cpp)
-target_link_libraries(metvoice_server PRIVATE metvoice_ipc metvoice_matrix metvoice_core metvoice_dsp)
+add_executable(muxella_server src/main.cpp)
+target_link_libraries(muxella_server PRIVATE metvoice_ipc metvoice_matrix metvoice_core metvoice_dsp)
 
 # 5b. Native C++ USB/IP Virtual Cable Library & Host
 add_library(metvoice_usbip STATIC

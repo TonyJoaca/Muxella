@@ -64,7 +64,7 @@ class PerformanceSampler:
             selected.add(parent)  # Include the one-file bootloader.
         # Include the elevated cable broker even if UAC reparents it.
         selected.update(pid for pid, (_, exe) in processes.items()
-                        if exe in ('metvoice_server.exe', 'muxella_cables.exe'))
+                        if exe in ('muxella_server.exe', 'muxella_cables.exe'))
         while True:
             children = {pid for pid, (parent, _) in processes.items() if parent in selected}
             if children <= selected:
