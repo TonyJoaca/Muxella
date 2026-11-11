@@ -1,290 +1,322 @@
 #include "metvoice/core/endpoint_manager.hpp"
-#include <iostream>
-#include <sstream>
+#include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
+#include <iostream>
 
 namespace metvoice::core {
-
 namespace {
-    std::string wstring_to_utf8(const std::wstring& wstr) {
-        if (wstr.empty()) return "";
-        int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-        std::string str(size_needed, 0);
-        WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()), &str[0], size_needed, nullptr, nullptr);
-        return str;
+std::string utf8(const std::wstring& value) {
+    if (value.empty()) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
+    std::string result(size, 0);
+    WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), result.data(), size, nullptr, nullptr);
+    return result;
+}
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+std::string clean(std::string query) {
+    const auto first = query.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    query = query.substr(first, query.find_last_not_of(" \t\r\n") - first + 1);
+    for (const char* prefix : {"[WDM] ", "[VAIO] "})
+        if (query.rfind(prefix, 0) == 0) query = query.substr(std::char_traits<char>::length(prefix));
+    return query;
+}
+bool named_match(const std::string& query, const std::string& name) {
+    if (query == name) return true;
+    for (const char* alias : {"muxella main", "muxella spotify", "muxella discord", "muxella out b1", "muxella out b2", "muxella out b3"})
+        if (query == alias) return name.rfind(query + " (", 0) == 0 || name.find("(" + query + ")") != std::string::npos;
+    return false;
+}
+// -1 absent, -2 ambiguous. An ID request never falls back to a name/index.
+int resolve(const std::vector<DeviceInfo>& devices, const std::string& query) {
+    if (query.rfind("id:", 0) == 0) {
+        for (size_t i = 0; i < devices.size(); ++i) if (utf8(devices[i].id) == query.substr(3)) return static_cast<int>(i);
+        return -1;
     }
+    if (!query.empty() && std::all_of(query.begin(), query.end(), [](unsigned char c) { return std::isdigit(c); })) {
+        try { const auto i = std::stoul(query); return i < devices.size() ? static_cast<int>(i) : -1; } catch (...) { return -1; }
+    }
+    int result = -1;
+    for (size_t i = 0; i < devices.size(); ++i) {
+        if (named_match(lower(query), lower(utf8(devices[i].friendly_name)))) {
+            if (result != -1) return -2;
+            result = static_cast<int>(i);
+        }
+    }
+    return result;
+}
+bool disconnected(const std::string& query) {
+    const auto value = lower(query);
+    return value.empty() || value == "disconnect" || value == "select device" || value == "none";
+}
 }
 
-EndpointManager::EndpointManager(matrix::MixerEngine& engine)
-    : engine_(engine) {
-    capture_endpoints_.resize(engine_.num_strips());
-    render_endpoints_.resize(engine_.num_buses());
-    capture_names_.resize(engine_.num_strips(), "None");
-    render_names_.resize(engine_.num_buses(), "None");
+EndpointManager::EndpointManager(matrix::MixerEngine& engine) : engine_(engine) {
+    capture_endpoints_.resize(engine.num_strips()); render_endpoints_.resize(engine.num_buses());
+    capture_names_.resize(engine.num_strips(), "None"); render_names_.resize(engine.num_buses(), "None");
 }
-
 EndpointManager::~EndpointManager() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& ep : capture_endpoints_) {
-        if (ep) ep->stop();
-    }
-    for (auto& ep : render_endpoints_) {
-        if (ep) ep->stop();
-    }
+    for (auto& endpoint : capture_endpoints_) if (endpoint) endpoint->stop();
+    for (auto& endpoint : render_endpoints_) if (endpoint) endpoint->stop();
 }
-
-bool EndpointManager::attach_input(size_t strip_idx, const std::string& query) {
-    if (strip_idx >= engine_.num_strips()) return false;
-
+bool EndpointManager::attach_input(size_t index, const std::string& selection) {
+    if (index >= capture_endpoints_.size()) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-
-    // Stop existing endpoint on this strip
-    if (capture_endpoints_[strip_idx]) {
-        capture_endpoints_[strip_idx]->stop();
-        capture_endpoints_[strip_idx].reset();
-        capture_names_[strip_idx] = "None";
-    }
-
-    std::string clean_q = query;
-    while (!clean_q.empty() && (clean_q.front() == ' ' || clean_q.front() == '\t')) clean_q.erase(0, 1);
-    while (!clean_q.empty() && (clean_q.back() == ' ' || clean_q.back() == '\t' || clean_q.back() == '\r' || clean_q.back() == '\n')) clean_q.pop_back();
-    if (clean_q.rfind("[WDM] ", 0) == 0) {
-        clean_q = clean_q.substr(6);
-        while (!clean_q.empty() && clean_q.front() == ' ') clean_q.erase(0, 1);
-    }
-
-    if (clean_q == "disconnect" || clean_q == "Select Device" || clean_q == "none" || clean_q.empty()) {
-        return true;
-    }
-
+    engine_.input_connection_state(index)->store(false);
+    engine_.input_virtual_state(index)->store(false);
+    if (capture_endpoints_[index]) capture_endpoints_[index]->stop();
+    capture_endpoints_[index].reset(); capture_names_[index] = "None";
+    const auto query = clean(selection);
+    if (disconnected(query)) return true;
+    if (!engine_.strip(index).is_enabled()) return false;
     auto devices = WasapiEndpoint::enumerate_devices(DeviceType::Capture);
-    if (devices.empty()) return false;
-
-    // Check if clean_q is a pure number index
-    int found_idx = -1;
-    bool is_pure_number = !clean_q.empty() && std::all_of(clean_q.begin(), clean_q.end(), ::isdigit);
-    if (is_pure_number) {
-        try {
-            size_t parsed_idx = std::stoul(clean_q);
-            if (parsed_idx < devices.size()) {
-                found_idx = static_cast<int>(parsed_idx);
-            }
-        } catch (...) {}
+    int found = resolve(devices, query);
+    if (found == -2) return false;
+    if (found < 0) {
+        if (query.rfind("id:", 0) != 0 &&
+            (lower(query).rfind("muxella ", 0) == 0 ||
+             std::all_of(query.begin(), query.end(), [](unsigned char c) { return std::isdigit(c); }))) return false;
+        devices = WasapiEndpoint::enumerate_devices(DeviceType::Render);
+        found = resolve(devices, query);
+        if (found < 0) return false;
+        devices[found].type = DeviceType::LoopbackRender;
     }
-
-    // Otherwise search by friendly name (case-insensitive)
-    if (found_idx == -1) {
-        std::string clean_lower = clean_q;
-        std::transform(clean_lower.begin(), clean_lower.end(), clean_lower.begin(), ::tolower);
-
-        // 1. Exact match
-        for (size_t i = 0; i < devices.size(); ++i) {
-            std::string d_name = wstring_to_utf8(devices[i].friendly_name);
-            std::string d_lower = d_name;
-            std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(), ::tolower);
-            if (d_lower == clean_lower) {
-                found_idx = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // 2. Substring match
-        if (found_idx == -1) {
-            for (size_t i = 0; i < devices.size(); ++i) {
-                std::string d_name = wstring_to_utf8(devices[i].friendly_name);
-                std::string d_lower = d_name;
-                std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(), ::tolower);
-                if (d_lower.find(clean_lower) != std::string::npos || clean_lower.find(d_lower) != std::string::npos) {
-                    found_idx = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-    }
-
-    if (found_idx < 0 || found_idx >= static_cast<int>(devices.size())) {
-        std::cerr << "[EndpointManager] Could not find capture device matching: " << query << "\n";
-        return false;
-    }
-
-    const auto& dev_info = devices[found_idx];
     AudioStreamConfig config;
-    config.sample_rate = 48000;
-    config.channels = 2;
-    config.buffer_frames = 480;
-
-    auto ep = std::make_unique<WasapiEndpoint>(dev_info, config, engine_.strip_input_ring_buffer(strip_idx));
-    if (ep->start()) {
-        capture_endpoints_[strip_idx] = std::move(ep);
-        capture_names_[strip_idx] = wstring_to_utf8(dev_info.friendly_name);
-        std::cout << "[EndpointManager] Strip " << strip_idx << " attached to capture device: "
-                  << capture_names_[strip_idx] << "\n";
-        return true;
-    }
-    return false;
+    config.sample_rate = static_cast<uint32_t>(engine_.sample_rate()); config.channels = 2;
+    config.buffer_frames = static_cast<uint32_t>(engine_.block_frames());
+    engine_.strip_input_ring_buffer(index)->reset_metrics();
+    engine_.input_virtual_state(index)->store(devices[found].friendly_name.find(L"Muxella") != std::wstring::npos);
+    auto endpoint = std::make_unique<WasapiEndpoint>(devices[found], config, engine_.strip_input_ring_buffer(index), engine_.input_connection_state(index), static_cast<uint8_t>(index));
+    if (!endpoint->start()) return false;
+    capture_names_[index] = utf8(devices[found].friendly_name);
+    capture_endpoints_[index] = std::move(endpoint);
+    return true;
 }
-
-bool EndpointManager::attach_output(size_t bus_idx, const std::string& query) {
-    if (bus_idx >= engine_.num_buses()) return false;
-
+bool EndpointManager::attach_output(size_t index, const std::string& selection) {
+    if (index >= render_endpoints_.size()) return false;
     std::lock_guard<std::mutex> lock(mutex_);
-
-    if (render_endpoints_[bus_idx]) {
-        render_endpoints_[bus_idx]->stop();
-        render_endpoints_[bus_idx].reset();
-        render_names_[bus_idx] = "None";
-    }
-
-    std::string clean_q = query;
-    while (!clean_q.empty() && (clean_q.front() == ' ' || clean_q.front() == '\t')) clean_q.erase(0, 1);
-    while (!clean_q.empty() && (clean_q.back() == ' ' || clean_q.back() == '\t' || clean_q.back() == '\r' || clean_q.back() == '\n')) clean_q.pop_back();
-    if (clean_q.rfind("[WDM] ", 0) == 0) {
-        clean_q = clean_q.substr(6);
-        while (!clean_q.empty() && clean_q.front() == ' ') clean_q.erase(0, 1);
-    }
-
-    if (clean_q == "disconnect" || clean_q == "Select Device" || clean_q == "none" || clean_q.empty()) {
-        return true;
-    }
-
+    engine_.output_connection_state(index)->store(false);
+    if (render_endpoints_[index]) render_endpoints_[index]->stop();
+    render_endpoints_[index].reset(); render_names_[index] = "None";
+    const auto query = clean(selection);
+    if (disconnected(query)) return true;
+    if (!engine_.bus(index).is_enabled()) return false;
     auto devices = WasapiEndpoint::enumerate_devices(DeviceType::Render);
-    if (devices.empty()) return false;
-
-    int found_idx = -1;
-    bool is_pure_number = !clean_q.empty() && std::all_of(clean_q.begin(), clean_q.end(), ::isdigit);
-    if (is_pure_number) {
-        try {
-            size_t parsed_idx = std::stoul(clean_q);
-            if (parsed_idx < devices.size()) {
-                found_idx = static_cast<int>(parsed_idx);
-            }
-        } catch (...) {}
-    }
-
-    if (found_idx == -1) {
-        std::string clean_lower = clean_q;
-        std::transform(clean_lower.begin(), clean_lower.end(), clean_lower.begin(), ::tolower);
-
-        // 1. Exact match
-        for (size_t i = 0; i < devices.size(); ++i) {
-            std::string d_name = wstring_to_utf8(devices[i].friendly_name);
-            std::string d_lower = d_name;
-            std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(), ::tolower);
-            if (d_lower == clean_lower) {
-                found_idx = static_cast<int>(i);
-                break;
-            }
-        }
-
-        // 2. Substring match
-        if (found_idx == -1) {
-            for (size_t i = 0; i < devices.size(); ++i) {
-                std::string d_name = wstring_to_utf8(devices[i].friendly_name);
-                std::string d_lower = d_name;
-                std::transform(d_lower.begin(), d_lower.end(), d_lower.begin(), ::tolower);
-                if (d_lower.find(clean_lower) != std::string::npos || clean_lower.find(d_lower) != std::string::npos) {
-                    found_idx = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-    }
-
-    if (found_idx < 0 || found_idx >= static_cast<int>(devices.size())) {
-        std::cerr << "[EndpointManager] Could not find render device matching: " << query << "\n";
-        return false;
-    }
-
-    const auto& dev_info = devices[found_idx];
+    const int found = resolve(devices, query);
+    if (found < 0) return false;
     AudioStreamConfig config;
-    config.sample_rate = 48000;
-    config.channels = 2;
-    config.buffer_frames = 480;
-
-    auto ep = std::make_unique<WasapiEndpoint>(dev_info, config, engine_.bus_output_ring_buffer(bus_idx));
-    if (ep->start()) {
-        render_endpoints_[bus_idx] = std::move(ep);
-        render_names_[bus_idx] = wstring_to_utf8(dev_info.friendly_name);
-        std::cout << "[EndpointManager] Bus " << bus_idx << " attached to render device: "
-                  << render_names_[bus_idx] << "\n";
-        return true;
+    config.sample_rate = static_cast<uint32_t>(engine_.sample_rate()); config.channels = 2;
+    config.buffer_frames = static_cast<uint32_t>(engine_.block_frames());
+    engine_.bus_output_ring_buffer(index)->reset_metrics();
+    auto endpoint = std::make_unique<WasapiEndpoint>(devices[found], config, engine_.bus_output_ring_buffer(index), engine_.output_connection_state(index), static_cast<uint8_t>(index));
+    if (!endpoint->start()) return false;
+    render_names_[index] = utf8(devices[found].friendly_name);
+    render_endpoints_[index] = std::move(endpoint);
+    return true;
+}
+void EndpointManager::detach_input(size_t index) { attach_input(index, "disconnect"); }
+void EndpointManager::detach_output(size_t index) { attach_output(index, "disconnect"); }
+bool EndpointManager::set_input_enabled(size_t index, bool enabled) {
+    if (index >= capture_endpoints_.size()) return false;
+    engine_.strip(index).set_enabled(enabled);
+    if (!enabled) detach_input(index);
+    return true;
+}
+bool EndpointManager::set_output_enabled(size_t index, bool enabled) {
+    if (index >= render_endpoints_.size()) return false;
+    engine_.bus(index).set_enabled(enabled);
+    if (!enabled) {
+        detach_output(index);
+        // The render consumer has stopped; discard its old output before reuse.
+        engine_.bus_output_ring_buffer(index)->reset();
     }
-    return false;
+    return true;
 }
-
-void EndpointManager::detach_input(size_t strip_idx) {
-    attach_input(strip_idx, "disconnect");
-}
-
-void EndpointManager::detach_output(size_t bus_idx) {
-    attach_output(bus_idx, "disconnect");
-}
-
-std::string EndpointManager::get_input_name(size_t strip_idx) const {
+std::string EndpointManager::get_input_name(size_t index) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (strip_idx < capture_names_.size()) return capture_names_[strip_idx];
-    return "None";
+    return index < capture_names_.size() ? capture_names_[index] : "None";
 }
-
-std::string EndpointManager::get_output_name(size_t bus_idx) const {
+std::string EndpointManager::get_output_name(size_t index) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (bus_idx < render_names_.size()) return render_names_[bus_idx];
-    return "None";
+    return index < render_names_.size() ? render_names_[index] : "None";
 }
-
 std::string EndpointManager::serialize_devices_json() const {
-    auto captures = WasapiEndpoint::enumerate_devices(DeviceType::Capture);
-    auto renders = WasapiEndpoint::enumerate_devices(DeviceType::Render);
+    using Json = nlohmann::json;
+    const auto captures = WasapiEndpoint::enumerate_devices(DeviceType::Capture);
+    const auto renders = WasapiEndpoint::enumerate_devices(DeviceType::Render);
+    std::lock_guard<std::mutex> lock(mutex_);
+    Json data = {{"type", "devices"}, {"captures", Json::array()}, {"renders", Json::array()},
+        {"attached_inputs", Json::array()}, {"attached_outputs", Json::array()},
+        {"attached_input_ids", Json::array()}, {"attached_output_ids", Json::array()}};
+    auto add_devices = [&](const char* key, const auto& devices) {
+        for (size_t i = 0; i < devices.size(); ++i) {
+            const auto& d = devices[i];
+            data[key].push_back({{"index", i}, {"id", utf8(d.id)}, {"name", utf8(d.friendly_name)},
+                {"default", d.is_default}, {"rate", d.default_sample_rate}, {"channels", d.channels}});
+        }
+    };
+    add_devices("captures", captures); add_devices("renders", renders);
+    auto add_attached = [&](const char* key, const char* ids, const auto& endpoints, const auto& names) {
+        for (size_t i = 0; i < endpoints.size(); ++i) {
+            const bool running = endpoints[i] && endpoints[i]->is_running();
+            data[key].push_back(running ? names[i] : "None");
+            data[ids].push_back(running ? utf8(endpoints[i]->info().id) : "");
+        }
+    };
+    add_attached("attached_inputs", "attached_input_ids", capture_endpoints_, capture_names_);
+    add_attached("attached_outputs", "attached_output_ids", render_endpoints_, render_names_);
+    return data.dump(-1, ' ', false, Json::error_handler_t::replace);
+}
+std::string EndpointManager::serialize_health_json() const {
+    using Json = nlohmann::json;
+    std::lock_guard<std::mutex> lock(mutex_);
 
-    std::ostringstream ss;
-    ss << "{\"type\":\"devices\"";
+    auto stage_name = [](GlitchStage s) -> const char* {
+        switch (s) {
+            case GlitchStage::Capture: return "Capture";
+            case GlitchStage::StripInput: return "StripIn";
+            case GlitchStage::StripDsp: return "StripDSP";
+            case GlitchStage::BusOut: return "BusOut";
+            case GlitchStage::Render: return "Render";
+            case GlitchStage::EngineTimer: return "EngineTimer";
+            default: return "Unknown";
+        }
+    };
+    auto kind_name = [](GlitchKind k) -> const char* {
+        switch (k) {
+            case GlitchKind::WasapiDiscontinuity: return "WASAPI_DISCONTINUITY";
+            case GlitchKind::StripStarve: return "STRIP_STARVE";
+            case GlitchKind::StripUnprime: return "STRIP_UNPRIME";
+            case GlitchKind::StripTruncate: return "STRIP_TRUNCATE";
+            case GlitchKind::RenderUnderrun: return "RENDER_UNDERRUN";
+            case GlitchKind::RenderDiscard: return "RENDER_DISCARD";
+            case GlitchKind::RenderRebuffer: return "RENDER_REBUFFER";
+            case GlitchKind::StepJump: return "STEP_JUMP";
+            case GlitchKind::ZeroDrop: return "ZERO_DROP";
+            case GlitchKind::LateTick: return "LATE_TICK";
+            case GlitchKind::TimerResync: return "TIMER_RESYNC";
+            default: return "UNKNOWN";
+        }
+    };
 
-    ss << ",\"attached_inputs\":[";
-    for (size_t i = 0; i < capture_names_.size(); ++i) {
-        if (i > 0) ss << ",";
-        std::string clean;
-        for (char c : capture_names_[i]) { if (c == '\"' || c == '\\') clean += '\\'; clean += c; }
-        ss << "\"" << clean << "\"";
+    AudioDebugEvent tmp[256];
+    auto collect_events = [&](size_t count) {
+        for (size_t k = 0; k < count; ++k) {
+            recent_events_.push_back(tmp[k]);
+        }
+    };
+    for (const auto& ep : capture_endpoints_) {
+        if (ep) collect_events(ep->drain_debug_events(tmp, 256));
     }
-    ss << "]";
+    for (const auto& ep : render_endpoints_) {
+        if (ep) collect_events(ep->drain_debug_events(tmp, 256));
+    }
+    collect_events(engine_.drain_debug_events(tmp, 256));
+    std::stable_sort(recent_events_.begin(), recent_events_.end(),
+                     [](const AudioDebugEvent& a, const AudioDebugEvent& b) {
+                         return a.timestamp_ms < b.timestamp_ms;
+                     });
+    if (recent_events_.size() > 200) {
+        recent_events_.erase(recent_events_.begin(), recent_events_.begin() + (recent_events_.size() - 200));
+    }
 
-    ss << ",\"attached_outputs\":[";
-    for (size_t j = 0; j < render_names_.size(); ++j) {
-        if (j > 0) ss << ",";
-        std::string clean;
-        for (char c : render_names_[j]) { if (c == '\"' || c == '\\') clean += '\\'; clean += c; }
-        ss << "\"" << clean << "\"";
-    }
-    ss << "]";
+    const auto& sched = engine_.scheduler_telemetry();
+    Json data = {
+        {"type", "health"},
+        {"sample_rate", engine_.sample_rate()},
+        {"block_ms", 1000.0 * engine_.block_frames() / engine_.sample_rate()},
+        {"engine", {
+            {"total_blocks", sched.total_blocks.load(std::memory_order_relaxed)},
+            {"late_ticks", sched.late_ticks.load(std::memory_order_relaxed)},
+            {"timer_resyncs", sched.timer_resyncs.load(std::memory_order_relaxed)},
+            {"max_jitter_ms", sched.max_jitter_ms.load(std::memory_order_relaxed)},
+            {"max_process_ms", sched.max_process_ms.load(std::memory_order_relaxed)}
+        }},
+        {"streams", Json::array()},
+        {"events", Json::array()}
+    };
 
-    ss << ",\"captures\":[";
-    for (size_t i = 0; i < captures.size(); ++i) {
-        if (i > 0) ss << ",";
-        std::string name = wstring_to_utf8(captures[i].friendly_name);
-        std::string clean;
-        for (char c : name) { if (c == '\"' || c == '\\') clean += '\\'; clean += c; }
-        ss << "{\"index\":" << i
-           << ",\"name\":\"" << clean << "\""
-           << ",\"default\":" << (captures[i].is_default ? "true" : "false")
-           << ",\"rate\":" << captures[i].default_sample_rate
-           << ",\"channels\":" << captures[i].channels
-           << "}";
+    auto add = [&](bool output, const auto& endpoints, const auto& names) {
+        for (size_t i = 0; i < endpoints.size(); ++i) {
+            auto ring = output ? engine_.bus_output_ring_buffer(i) : engine_.strip_input_ring_buffer(i);
+            const auto queued = std::min(ring->available_read(), ring->capacity());
+            const bool active = endpoints[i] && endpoints[i]->is_running();
+
+            uint64_t starves = 0;
+            uint64_t discards = 0;
+            uint64_t discard_samples = 0;
+            uint64_t discont = 0;
+            uint64_t glitches = active ? endpoints[i]->waveform_glitches() : 0;
+            double drift_ppm = 0.0;
+
+            if (!output) {
+                const auto& st = engine_.strip_telemetry(i);
+                starves = st.starve_events.load(std::memory_order_relaxed) +
+                          st.unprime_events.load(std::memory_order_relaxed) +
+                          st.truncate_events.load(std::memory_order_relaxed);
+                discont = active ? endpoints[i]->discontinuity_events() : 0;
+                glitches += st.dsp_glitches.load(std::memory_order_relaxed);
+                drift_ppm = st.drift_ppm.load(std::memory_order_relaxed);
+            } else {
+                const auto& bt = engine_.bus_telemetry(i);
+                starves = active ? endpoints[i]->render_underrun_events() : 0;
+                discards = active ? endpoints[i]->render_discard_events() : 0;
+                discard_samples = active ? endpoints[i]->render_discard_samples() : 0;
+                glitches += bt.bus_glitches.load(std::memory_order_relaxed);
+            }
+
+            data["streams"].push_back({
+                {"kind", output ? "output" : "input"},
+                {"index", i},
+                {"enabled", output ? engine_.bus(i).is_enabled() : engine_.strip(i).is_enabled()},
+                {"device", names[i]},
+                {"active", active},
+                {"queue_ms", active ? queued * 500.0 / engine_.sample_rate() : 0.0},
+                {"shortfall_samples", ring->underrun_count()},
+                {"dropped_samples", ring->overrun_count()},
+                {"clips", output ? engine_.bus(i).clip_events() : 0},
+                {"raw", active ? endpoints[i]->raw_status() : 0},
+                {"device_rate", active ? endpoints[i]->device_sample_rate() : 0},
+                {"device_channels", active ? endpoints[i]->device_channels() : 0},
+                {"device_bits", active ? endpoints[i]->device_bits() : 0},
+                {"wasapi_buffer_frames", active ? endpoints[i]->wasapi_buffer_frames() : 0},
+                {"drift_ppm", drift_ppm},
+                {"starves", starves},
+                {"discards", discards},
+                {"discard_samples", discard_samples},
+                {"discontinuities", discont},
+                {"glitches", glitches}
+            });
+        }
+    };
+    add(false, capture_endpoints_, capture_names_);
+    add(true, render_endpoints_, render_names_);
+
+    for (const auto& ev : recent_events_) {
+        data["events"].push_back({
+            {"ts_ms", ev.timestamp_ms},
+            {"stage", stage_name(ev.stage)},
+            {"index", ev.index},
+            {"kind", kind_name(ev.kind)},
+            {"value", ev.value}
+        });
     }
-    ss << "],\"renders\":[";
-    for (size_t j = 0; j < renders.size(); ++j) {
-        if (j > 0) ss << ",";
-        std::string name = wstring_to_utf8(renders[j].friendly_name);
-        std::string clean;
-        for (char c : name) { if (c == '\"' || c == '\\') clean += '\\'; clean += c; }
-        ss << "{\"index\":" << j
-           << ",\"name\":\"" << clean << "\""
-           << ",\"default\":" << (renders[j].is_default ? "true" : "false")
-           << ",\"rate\":" << renders[j].default_sample_rate
-           << ",\"channels\":" << renders[j].channels
-           << "}";
-    }
-    ss << "]}";
-    return ss.str();
+    return data.dump(-1, ' ', false, Json::error_handler_t::replace);
 }
 
+void EndpointManager::reset_health() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    recent_events_.clear();
+    engine_.reset_telemetry();
+    for (const auto& ep : capture_endpoints_) {
+        if (ep) ep->reset_telemetry();
+    }
+    for (const auto& ep : render_endpoints_) {
+        if (ep) ep->reset_telemetry();
+    }
+}
 } // namespace metvoice::core

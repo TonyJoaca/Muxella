@@ -41,6 +41,15 @@ void test_drift_correction() {
         assert(std::abs(out_l[i] - 0.5f) < 0.01f);
     }
 
+    // Tight virtual-cable max offset clamp (+/- 1000 ppm)
+    corrector.reset(TARGET_FILL);
+    corrector.set_max_ratio_offset(0.001);
+    for (int i = 0; i < 200; ++i) {
+        corrector.update_feedback(TARGET_FILL / 4);
+    }
+    assert(corrector.current_ratio() >= 0.999 - 1e-6);
+    assert(corrector.current_ratio() <= 1.001 + 1e-6);
+
     std::cout << "Drift correction verified PASSED!\n";
 }
 

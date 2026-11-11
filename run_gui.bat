@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-python metvoice_gui.py
+python muxella_gui.py

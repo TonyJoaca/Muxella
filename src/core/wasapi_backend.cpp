@@ -9,6 +9,25 @@
 namespace metvoice::core {
 
 namespace {
+    bool is_virtual_cable(const DeviceInfo& info) {
+        return info.friendly_name.find(L"Muxella") != std::wstring::npos;
+    }
+
+    int configure_cable_raw_stream(IAudioClient* client, const DeviceInfo& info) {
+        if (!client || !is_virtual_cable(info)) return 0;
+        IAudioClient2* client2 = nullptr;
+        if (SUCCEEDED(client->QueryInterface(__uuidof(IAudioClient2), reinterpret_cast<void**>(&client2)))) {
+            AudioClientProperties properties{};
+            properties.cbSize = sizeof(properties);
+            properties.eCategory = AudioCategory_Other;
+            properties.Options = AUDCLNT_STREAMOPTIONS_RAW;
+            const HRESULT hr = client2->SetClientProperties(&properties);
+            if (FAILED(hr)) std::cerr << "[Cable] RAW stream unavailable: 0x" << std::hex << hr << std::dec << "\n";
+            client2->Release();
+            return SUCCEEDED(hr) ? 1 : -1;
+        }
+        return -1;
+    }
     std::wstring get_device_property(IPropertyStore* props, const PROPERTYKEY& key) {
         if (!props) return L"Unknown";
         PROPVARIANT var;
@@ -100,8 +119,9 @@ std::vector<DeviceInfo> WasapiEndpoint::enumerate_devices(DeviceType type) {
 }
 
 WasapiEndpoint::WasapiEndpoint(const DeviceInfo& info, const AudioStreamConfig& config,
-                               std::shared_ptr<SpscRingBuffer<float>> ring_buffer)
-    : info_(info), config_(config), ring_buffer_(std::move(ring_buffer)) {
+                               std::shared_ptr<SpscRingBuffer<float>> ring_buffer, std::atomic<bool>* connection_state,
+                               uint8_t stream_index)
+    : connection_state_(connection_state), stream_index_(stream_index), info_(info), config_(config), ring_buffer_(std::move(ring_buffer)) {
 }
 
 WasapiEndpoint::~WasapiEndpoint() {
@@ -110,6 +130,8 @@ WasapiEndpoint::~WasapiEndpoint() {
 
 bool WasapiEndpoint::start() {
     if (running_.load()) return true;
+    // An explicitly selected endpoint must never become the system default.
+    if (info_.id.empty()) return false;
 
     stop_signal_.store(false);
     if (info_.type == DeviceType::Capture || info_.type == DeviceType::LoopbackRender) {
@@ -134,7 +156,7 @@ void WasapiEndpoint::stop() {
     if (worker_thread_.joinable()) {
         worker_thread_.join();
     }
-    running_.store(false);
+    set_running(false);
 }
 
 void WasapiEndpoint::capture_thread_proc() {
@@ -182,6 +204,7 @@ void WasapiEndpoint::capture_thread_proc() {
         return;
     }
 
+    raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
     hr = audio_client_->GetMixFormat(&wave_format_);
     if (FAILED(hr) || !wave_format_) {
         std::cerr << "[Capture Error] GetMixFormat failed: hr=0x" << std::hex << hr << std::dec << "\n";
@@ -245,18 +268,26 @@ void WasapiEndpoint::capture_thread_proc() {
 
     const size_t in_channels = wave_format_->nChannels;
     const uint32_t in_rate = wave_format_->nSamplesPerSec;
+    device_sample_rate_.store(in_rate, std::memory_order_relaxed);
+    device_channels_.store(wave_format_->nChannels, std::memory_order_relaxed);
+    device_bits_.store(wave_format_->wBitsPerSample, std::memory_order_relaxed);
+    wasapi_buffer_frames_.store(buffer_frame_count_, std::memory_order_relaxed);
     const bool is_float = (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
         (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
          reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT));
 
     std::vector<float> stereo_conv_buf;
-    stereo_conv_buf.reserve(buffer_frame_count_ * 4);
+    stereo_conv_buf.reserve(static_cast<size_t>(std::ceil(buffer_frame_count_ *
+        static_cast<double>(config_.sample_rate) / in_rate) + 4) * 2);
+    // WASAPI packets cannot exceed this client's negotiated buffer size.
+    std::vector<float> input_stereo(buffer_frame_count_ * 2);
 
     audio_client_->Start();
-    running_.store(true);
+    set_running(true);
 
     double resample_phase = 0.0;
-    const double resample_ratio = static_cast<double>(in_rate) / 48000.0;
+    const double resample_ratio = static_cast<double>(in_rate) / config_.sample_rate;
+    SignalGlitchDetector glitch_detector;
 
     while (!stop_signal_.load(std::memory_order_relaxed)) {
         DWORD wait_res = WaitForSingleObject(audio_event_, 100);
@@ -265,13 +296,19 @@ void WasapiEndpoint::capture_thread_proc() {
 
         UINT32 packet_length = 0;
         hr = capture_client_->GetNextPacketSize(&packet_length);
+        if (FAILED(hr)) break;
         while (SUCCEEDED(hr) && packet_length > 0) {
             BYTE* data = nullptr;
             UINT32 frames_available = 0;
             DWORD flags = 0;
 
             hr = capture_client_->GetBuffer(&data, &frames_available, &flags, nullptr, nullptr);
-            if (SUCCEEDED(hr) && data && frames_available > 0) {
+            if (SUCCEEDED(hr) && frames_available > 0) {
+                if (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY) {
+                    discontinuity_events_.fetch_add(1, std::memory_order_relaxed);
+                    push_event(GlitchStage::Capture, GlitchKind::WasapiDiscontinuity, static_cast<float>(frames_available));
+                    glitch_detector.reset();
+                }
                 stereo_conv_buf.clear();
 
                 auto extract_sample = [&](size_t offset) -> float {
@@ -296,10 +333,12 @@ void WasapiEndpoint::capture_thread_proc() {
                 };
 
                 // Convert whatever input format to clean stereo
-                std::vector<float> input_stereo(frames_available * 2);
-                if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
+                input_stereo.resize(frames_available * 2);
+                if (!data || (flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
                     std::fill(input_stereo.begin(), input_stereo.end(), 0.0f);
+                    glitch_detector.reset();
                 } else {
+                    bool packet_glitch_logged = false;
                     for (size_t f = 0; f < frames_available; ++f) {
                         float left = 0.0f;
                         float right = 0.0f;
@@ -315,11 +354,21 @@ void WasapiEndpoint::capture_thread_proc() {
 
                         input_stereo[f * 2 + 0] = left;
                         input_stereo[f * 2 + 1] = right;
+
+                        GlitchKind gk{};
+                        float gv = 0.0f;
+                        if (glitch_detector.check_frame(left, right, gk, gv)) {
+                            waveform_glitches_.fetch_add(1, std::memory_order_relaxed);
+                            if (!packet_glitch_logged) {
+                                push_event(GlitchStage::Capture, gk, gv);
+                                packet_glitch_logged = true;
+                            }
+                        }
                     }
                 }
 
                 // If sample rate is already 48000 Hz:
-                if (in_rate == 48000) {
+                if (in_rate == config_.sample_rate) {
                     if (ring_buffer_) {
                         ring_buffer_->write(input_stereo.data(), input_stereo.size());
                     }
@@ -356,7 +405,7 @@ void WasapiEndpoint::capture_thread_proc() {
     }
 
     audio_client_->Stop();
-    running_.store(false);
+    set_running(false);
 
     if (capture_client_) { capture_client_->Release(); capture_client_ = nullptr; }
     if (audio_event_) { CloseHandle(audio_event_); audio_event_ = nullptr; }
@@ -402,6 +451,7 @@ void WasapiEndpoint::render_thread_proc() {
         return;
     }
 
+    raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
     hr = audio_client_->GetMixFormat(&wave_format_);
     if (FAILED(hr) || !wave_format_) {
         audio_client_->Release();
@@ -452,17 +502,41 @@ void WasapiEndpoint::render_thread_proc() {
     }
 
     const size_t out_channels = wave_format_->nChannels;
+    device_sample_rate_.store(wave_format_->nSamplesPerSec, std::memory_order_relaxed);
+    device_channels_.store(wave_format_->nChannels, std::memory_order_relaxed);
+    device_bits_.store(wave_format_->wBitsPerSample, std::memory_order_relaxed);
+    wasapi_buffer_frames_.store(buffer_frame_count_, std::memory_order_relaxed);
     const bool is_float = (wave_format_->wFormatTag == WAVE_FORMAT_IEEE_FLOAT ||
         (wave_format_->wFormatTag == WAVE_FORMAT_EXTENSIBLE &&
          reinterpret_cast<WAVEFORMATEXTENSIBLE*>(wave_format_)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT));
 
     std::vector<float> stereo_read_buf;
     stereo_read_buf.resize(buffer_frame_count_ * 2, 0.0f);
+    const double render_ratio = static_cast<double>(config_.sample_rate) / wave_format_->nSamplesPerSec;
+    double render_phase = 0.0;
+    float previous_frame[2] = {}, next_frame[2] = {};
+    bool resampler_ready = false;
+    auto read_frame = [&](float* frame) -> bool {
+        if (ring_buffer_ && ring_buffer_->read(frame, 2) == 2) {
+            return true;
+        }
+        frame[0] *= 0.95f;
+        frame[1] *= 0.95f;
+        return false;
+    };
 
-    // Pre-buffer / prime the ring buffer with 20ms of silence so render never starves on cold start
+    // Keep a healthy 2-block cushion on attach so the device doesn't start starved.
+    // Safe before set_running(true) because the mixer engine is not yet producing to this ring.
     if (ring_buffer_) {
-        std::vector<float> prime_silence(buffer_frame_count_ * 4, 0.0f);
-        ring_buffer_->write(prime_silence.data(), prime_silence.size());
+        const size_t available = ring_buffer_->available_read();
+        const size_t target_cushion = std::max<size_t>(buffer_frame_count_ * 4, config_.buffer_frames * 4);
+        if (available > target_cushion) {
+            ring_buffer_->discard((available - target_cushion) & ~size_t(1));
+        } else if (available < target_cushion) {
+            const size_t fill_count = (target_cushion - available) & ~size_t(1);
+            std::vector<float> silence(fill_count, 0.0f);
+            ring_buffer_->write(silence.data(), fill_count);
+        }
     }
 
     // Prime hardware render buffer
@@ -472,7 +546,15 @@ void WasapiEndpoint::render_thread_proc() {
     }
 
     audio_client_->Start();
-    running_.store(true);
+    set_running(true);
+
+    bool rebuffering = false;
+    bool pending_crossfade = false;
+    float hold_l = 0.0f;
+    float hold_r = 0.0f;
+    float xfade_from_l = 0.0f;
+    float xfade_from_r = 0.0f;
+    SignalGlitchDetector glitch_detector;
 
     while (!stop_signal_.load(std::memory_order_relaxed)) {
         DWORD wait_res = WaitForSingleObject(audio_event_, 100);
@@ -481,29 +563,147 @@ void WasapiEndpoint::render_thread_proc() {
 
         UINT32 padding = 0;
         hr = audio_client_->GetCurrentPadding(&padding);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING) break;
         if (FAILED(hr)) continue;
 
         UINT32 frames_needed = buffer_frame_count_ - padding;
         if (frames_needed == 0) continue;
+
+        const size_t live_target = std::max<size_t>(frames_needed * 2, config_.buffer_frames * 2);
+        const size_t healthy_cushion = live_target * 2;
+
+        if (ring_buffer_) {
+            const size_t available = ring_buffer_->available_read();
+            const double max_backlog_sec = is_virtual_cable(info_) ? 0.320 : 0.150;
+            const size_t backlog_limit = std::max<size_t>(healthy_cushion * 3, static_cast<size_t>(config_.sample_rate * 2 * max_backlog_sec));
+            if (available > backlog_limit) {
+                const size_t drop_samples = (available - healthy_cushion) & ~size_t(1);
+                ring_buffer_->discard(drop_samples);
+                render_discard_events_.fetch_add(1, std::memory_order_relaxed);
+                render_discard_samples_.fetch_add(drop_samples, std::memory_order_relaxed);
+                push_event(GlitchStage::Render, GlitchKind::RenderDiscard, static_cast<float>(drop_samples / 2));
+                xfade_from_l = hold_l;
+                xfade_from_r = hold_r;
+                pending_crossfade = true;
+                resampler_ready = false;
+                render_phase = 0.0;
+                glitch_detector.reset();
+            }
+        }
 
         BYTE* render_data = nullptr;
         hr = render_client_->GetBuffer(frames_needed, &render_data);
         if (SUCCEEDED(hr) && render_data) {
             const size_t stereo_samples_needed = frames_needed * 2;
 
-            size_t samples_read = 0;
-            if (ring_buffer_) {
-                samples_read = ring_buffer_->read(stereo_read_buf.data(), stereo_samples_needed);
+            if (rebuffering && ring_buffer_) {
+                const size_t resume_threshold = std::max<size_t>(healthy_cushion / 2, stereo_samples_needed);
+                if (ring_buffer_->available_read() >= resume_threshold) {
+                    rebuffering = false;
+                    xfade_from_l = hold_l;
+                    xfade_from_r = hold_r;
+                    pending_crossfade = true;
+                    resampler_ready = false;
+                    render_phase = 0.0;
+                    glitch_detector.reset();
+                }
             }
 
-            if (samples_read < stereo_samples_needed) {
-                float last_l = (samples_read >= 2) ? stereo_read_buf[samples_read - 2] : 0.0f;
-                float last_r = (samples_read >= 2) ? stereo_read_buf[samples_read - 1] : 0.0f;
-                for (size_t s = samples_read; s < stereo_samples_needed; s += 2) {
-                    last_l *= 0.95f;
-                    last_r *= 0.95f;
-                    stereo_read_buf[s] = last_l;
-                    stereo_read_buf[s + 1] = last_r;
+            if (rebuffering) {
+                for (size_t s = 0; s < stereo_samples_needed; s += 2) {
+                    hold_l *= 0.95f;
+                    hold_r *= 0.95f;
+                    stereo_read_buf[s] = hold_l;
+                    stereo_read_buf[s + 1] = hold_r;
+                }
+            } else if (render_ratio == 1.0) {
+                size_t samples_read = 0;
+                if (ring_buffer_) {
+                    samples_read = ring_buffer_->read(stereo_read_buf.data(), stereo_samples_needed);
+                }
+
+                if (samples_read < stereo_samples_needed) {
+                    if (samples_read & 1) {
+                        samples_read &= ~size_t(1);
+                    }
+                    const size_t missing_frames = (stereo_samples_needed - samples_read) / 2;
+                    render_underrun_events_.fetch_add(1, std::memory_order_relaxed);
+                    push_event(GlitchStage::Render, GlitchKind::RenderUnderrun, static_cast<float>(missing_frames));
+
+                    hold_l = (samples_read >= 2) ? stereo_read_buf[samples_read - 2] : hold_l;
+                    hold_r = (samples_read >= 2) ? stereo_read_buf[samples_read - 1] : hold_r;
+                    for (size_t s = samples_read; s < stereo_samples_needed; s += 2) {
+                        hold_l *= 0.95f;
+                        hold_r *= 0.95f;
+                        stereo_read_buf[s] = hold_l;
+                        stereo_read_buf[s + 1] = hold_r;
+                    }
+                    rebuffering = true;
+                    push_event(GlitchStage::Render, GlitchKind::RenderRebuffer, static_cast<float>(healthy_cushion / 4));
+                } else if (stereo_samples_needed >= 2) {
+                    hold_l = stereo_read_buf[stereo_samples_needed - 2];
+                    hold_r = stereo_read_buf[stereo_samples_needed - 1];
+                }
+            } else {
+                bool underran = false;
+                if (!resampler_ready) {
+                    if (!read_frame(previous_frame) || !read_frame(next_frame)) {
+                        underran = true;
+                    }
+                    resampler_ready = true;
+                }
+                for (size_t frame = 0; frame < frames_needed; ++frame) {
+                    for (size_t ch = 0; ch < 2; ++ch)
+                        stereo_read_buf[frame * 2 + ch] = previous_frame[ch] +
+                            (next_frame[ch] - previous_frame[ch]) * static_cast<float>(render_phase);
+                    render_phase += render_ratio;
+                    while (render_phase >= 1.0) {
+                        previous_frame[0] = next_frame[0]; previous_frame[1] = next_frame[1];
+                        if (!read_frame(next_frame)) {
+                            underran = true;
+                        }
+                        render_phase -= 1.0;
+                    }
+                }
+                if (underran) {
+                    render_underrun_events_.fetch_add(1, std::memory_order_relaxed);
+                    push_event(GlitchStage::Render, GlitchKind::RenderUnderrun, static_cast<float>(frames_needed));
+                    rebuffering = true;
+                    resampler_ready = false;
+                    render_phase = 0.0;
+                    push_event(GlitchStage::Render, GlitchKind::RenderRebuffer, static_cast<float>(healthy_cushion / 4));
+                }
+                if (stereo_samples_needed >= 2) {
+                    hold_l = stereo_read_buf[stereo_samples_needed - 2];
+                    hold_r = stereo_read_buf[stereo_samples_needed - 1];
+                }
+            }
+
+            if (!rebuffering) {
+                if (pending_crossfade) {
+                    const size_t fade_frames = std::min<size_t>(frames_needed, 192);
+                    for (size_t f = 0; f < fade_frames; ++f) {
+                        const float t = static_cast<float>(f + 1) / static_cast<float>(fade_frames);
+                        stereo_read_buf[f * 2 + 0] = xfade_from_l * (1.0f - t) + stereo_read_buf[f * 2 + 0] * t;
+                        stereo_read_buf[f * 2 + 1] = xfade_from_r * (1.0f - t) + stereo_read_buf[f * 2 + 1] * t;
+                    }
+                    if (stereo_samples_needed >= 2) {
+                        hold_l = stereo_read_buf[stereo_samples_needed - 2];
+                        hold_r = stereo_read_buf[stereo_samples_needed - 1];
+                    }
+                    pending_crossfade = false;
+                }
+                bool packet_glitch_logged = false;
+                for (size_t f = 0; f < frames_needed; ++f) {
+                    GlitchKind gk{};
+                    float gv = 0.0f;
+                    if (glitch_detector.check_frame(stereo_read_buf[f * 2 + 0], stereo_read_buf[f * 2 + 1], gk, gv)) {
+                        waveform_glitches_.fetch_add(1, std::memory_order_relaxed);
+                        if (!packet_glitch_logged) {
+                            push_event(GlitchStage::Render, gk, gv);
+                            packet_glitch_logged = true;
+                        }
+                    }
                 }
             }
 
@@ -525,7 +725,8 @@ void WasapiEndpoint::render_thread_proc() {
                         reinterpret_cast<int32_t*>(render_data)[offset] = (s24 << 8);
                     }
                 } else if (wave_format_->wBitsPerSample == 32) {
-                    reinterpret_cast<int32_t*>(render_data)[offset] = static_cast<int32_t>(val * 2147483647.0f);
+                    const double scaled = static_cast<double>(val) * 2147483647.0;
+                    reinterpret_cast<int32_t*>(render_data)[offset] = static_cast<int32_t>(scaled);
                 }
             };
 
@@ -552,7 +753,7 @@ void WasapiEndpoint::render_thread_proc() {
     }
 
     audio_client_->Stop();
-    running_.store(false);
+    set_running(false);
 
     if (render_client_) { render_client_->Release(); render_client_ = nullptr; }
     if (audio_event_) { CloseHandle(audio_event_); audio_event_ = nullptr; }

@@ -17,6 +17,10 @@ public:
         handle_ = AvSetMmThreadCharacteristicsW(task_name, &task_index_);
         if (handle_) {
             AvSetMmThreadPriority(handle_, AVRT_PRIORITY_CRITICAL);
+        } else {
+            // Only fall back to Win32 TIME_CRITICAL (15) if MMCSS failed; calling it
+            // after AvSetMmThreadPriority clobbers BasePriority 26 back down to 15.
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
         }
     }
 
@@ -24,6 +28,8 @@ public:
         if (handle_) {
             AvRevertMmThreadCharacteristics(handle_);
             handle_ = nullptr;
+        } else {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
         }
     }
 

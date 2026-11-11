@@ -28,6 +28,7 @@ void test_matrix_summing_and_routing() {
 
     std::vector<float> bus0_out(FRAMES * 2, 0.0f);
     size_t read_cnt = engine.bus_output_ring_buffer(0)->read(bus0_out.data(), bus0_out.size());
+    (void)read_cnt;
     assert(read_cnt == FRAMES * 2);
 
     // Expected sum: Strip 0 (0.4) + Strip 1 (0.6 * 0.5 = 0.3) = ~0.7
@@ -83,9 +84,45 @@ void test_solo_and_mute_arbitration() {
     std::cout << "PASSED\n";
 }
 
+void test_starve_fade_continuity() {
+    std::cout << "[Test] Matrix: Smooth fade-out and fade-in across strip starve... ";
+    constexpr size_t FRAMES = 256;
+    metvoice::matrix::MixerEngine engine(1, 1, FRAMES);
+    engine.routing().set_route(0, 0, true, 0.0f);
+    engine.input_connection_state(0)->store(true);
+
+    // Prime strip with > 2048 floats (1024+ frames) of steady 0.8f audio
+    std::vector<float> audio_in(2048, 0.8f);
+    engine.strip_input_ring_buffer(0)->write(audio_in.data(), audio_in.size());
+    engine.process_block(FRAMES);
+
+    std::vector<float> bus_out(FRAMES * 2, 0.0f);
+    size_t got = engine.bus_output_ring_buffer(0)->read(bus_out.data(), bus_out.size());
+    (void)got;
+    assert(got == FRAMES * 2);
+    // First block fades in smoothly from 0 instead of stepping straight to full level
+    assert(std::abs(bus_out[0]) < 0.05f);
+    assert(bus_out[FRAMES * 2 - 1] > 0.4f);
+
+    // Drain remaining samples so next block triggers StripStarve
+    std::vector<float> drain(engine.strip_input_ring_buffer(0)->available_read());
+    engine.strip_input_ring_buffer(0)->read(drain.data(), drain.size());
+    engine.process_block(FRAMES);
+    got = engine.bus_output_ring_buffer(0)->read(bus_out.data(), bus_out.size());
+    (void)got;
+    assert(got == FRAMES * 2);
+    assert(engine.strip_telemetry(0).starve_events.load() == 1);
+    // Starved block ramps smoothly downward from previous level rather than instant 0 step
+    assert(bus_out[0] > 0.3f);
+    assert(std::abs(bus_out[FRAMES * 2 - 1]) < 1e-5f);
+
+    std::cout << "PASSED\n";
+}
+
 int main() {
     test_matrix_summing_and_routing();
     test_solo_and_mute_arbitration();
+    test_starve_fade_continuity();
     std::cout << "All Matrix Routing tests passed successfully!\n";
     return 0;
 }

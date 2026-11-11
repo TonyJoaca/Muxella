@@ -44,14 +44,19 @@ public:
 
     [[nodiscard]] double current_ratio() const noexcept { return current_ratio_; }
     [[nodiscard]] double drift_ppm() const noexcept { return (current_ratio_ - 1.0) * 1e6; }
+    void set_max_ratio_offset(double max_offset) noexcept {
+        max_ratio_offset_ = std::clamp(max_offset, 0.0001, 0.01);
+    }
 
 private:
     size_t channels_{2};
     size_t target_fill_level_{1024};
     double kp_{0.000002};
     double ki_{0.00000005};
+    double max_ratio_offset_{0.005};
 
     double integral_error_{0.0};
+    double filtered_fill_{0.0};
     double current_ratio_{1.0};
     double sub_sample_pos_{0.0};
 

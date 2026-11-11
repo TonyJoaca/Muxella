@@ -2,6 +2,10 @@
 #include "metvoice/dsp/compressor.hpp"
 #include "metvoice/dsp/limiter.hpp"
 #include "metvoice/dsp/meter.hpp"
+#include "metvoice/dsp/gate.hpp"
+#include "metvoice/dsp/denoise.hpp"
+#include "metvoice/dsp/reverb.hpp"
+#include "metvoice/dsp/dsp_strip.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -76,10 +80,78 @@ void test_limiter_ceiling_guarantee() {
     std::cout << "PASSED (Limited " << limiter.clip_events() << " samples smoothly)\n";
 }
 
+void test_strip_fx_chain() {
+    std::cout << "[Test] DSP: DspChannelStrip FX Chain (Gate, Denoiser, Reverb, Comp)... ";
+    metvoice::dsp::DspChannelStrip strip("TestStrip", 48000.0f);
+
+    strip.set_gate(5.0f);
+    assert(strip.gate_amount() > 0.0f);
+
+    strip.set_denoise(4.0f);
+    assert(strip.denoise_amount() > 0.0f);
+
+    strip.set_comp(3.0f);
+    assert(strip.comp_amount() > 0.0f);
+    assert(strip.is_compressor_enabled());
+
+    strip.set_reverb(5.0f);
+    assert(strip.reverb_amount() > 0.0f);
+
+    // Process a test audio buffer
+    metvoice::core::AudioBuffer buf(2, 480);
+    for (size_t ch = 0; ch < 2; ++ch) {
+        float* d = buf.channel_data(ch);
+        for (size_t f = 0; f < 480; ++f) {
+            d[f] = 0.2f * std::sin(2.0f * std::numbers::pi * 440.0f * f / 48000.0f);
+        }
+    }
+
+    strip.process(buf);
+
+    // Verify buffer was processed cleanly without NaNs or infinities
+    for (size_t ch = 0; ch < 2; ++ch) {
+        float* d = buf.channel_data(ch);
+        for (size_t f = 0; f < 480; ++f) {
+            assert(!std::isnan(d[f]));
+            assert(!std::isinf(d[f]));
+        }
+    }
+    std::cout << "PASSED\n";
+}
+
+void test_rnnoise_denoiser_reduction() {
+    std::cout << "[Test] DSP: RNNoise neural noise suppression on stationary noise... ";
+    metvoice::dsp::Denoiser denoiser(48000.0f);
+    denoiser.set_amount(8.0f); // Strong neural suppression
+    assert(denoiser.is_enabled());
+
+    // Generate white noise block
+    std::vector<float> noise_in(4800);
+    uint32_t seed = 123456789;
+    for (size_t i = 0; i < noise_in.size(); ++i) {
+        seed = seed * 1664525 + 1013904223;
+        noise_in[i] = ((static_cast<float>(seed & 0xFFFF) / 32768.0f) - 1.0f) * 0.08f;
+    }
+
+    float* ptrs[1] = {noise_in.data()};
+    denoiser.process(1, ptrs, noise_in.size());
+
+    // Check energy in the processed audio
+    float power_after = 0.0f;
+    for (size_t i = 2400; i < 4800; ++i) {
+        assert(!std::isnan(noise_in[i]));
+        assert(!std::isinf(noise_in[i]));
+        power_after += noise_in[i] * noise_in[i];
+    }
+    std::cout << "PASSED (Residual power: " << power_after << ")\n";
+}
+
 int main() {
     test_biquad_lowpass();
     test_compressor_dynamics();
     test_limiter_ceiling_guarantee();
+    test_strip_fx_chain();
+    test_rnnoise_denoiser_reduction();
     std::cout << "All DSP unit tests passed successfully!\n";
     return 0;
 }

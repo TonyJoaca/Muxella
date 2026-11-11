@@ -19,6 +19,8 @@ public:
     bool start();
     void stop();
 
+    void set_shutdown_handler(std::function<void()> handler) { on_shutdown_ = std::move(handler); }
+
     [[nodiscard]] bool is_running() const noexcept { return running_.load(); }
 
 private:
@@ -29,7 +31,9 @@ private:
     std::wstring pipe_name_;
     std::atomic<bool> running_{false};
     std::atomic<bool> stop_signal_{false};
+    std::function<void()> on_shutdown_{nullptr};
     std::thread worker_thread_;
+    HANDLE stop_event_{nullptr};
 };
 
 } // namespace metvoice::ipc

@@ -5,6 +5,8 @@
 #include <sstream>
 #include <iomanip>
 
+#include <functional>
+
 namespace metvoice::core {
     class EndpointManager;
 }
@@ -18,7 +20,8 @@ class CommandDispatcher {
 public:
     static std::string execute_command(matrix::MixerEngine& engine,
                                        core::EndpointManager* ep_mgr,
-                                       const std::string& request);
+                                       const std::string& request,
+                                       std::function<void()>* on_shutdown = nullptr);
 
     static std::string serialize_meters_json(const matrix::MixerEngine& engine);
     static std::string serialize_status_json(const matrix::MixerEngine& engine);

@@ -1,5 +1,6 @@
 build/
 bin/
+dist/
 *.exe
 *.o
 *.a
@@ -7,3 +8,4 @@ bin/
 .idea/
 __pycache__/
 *.pyc
+muxella_crackle_*.txt

@@ -54,9 +54,9 @@ public:
      * Safe to call from any thread, but strictly accurate on consumer.
      */
     [[nodiscard]] size_t available_read() const noexcept {
+        const size_t r = read_pos_.load(std::memory_order_acquire);
         const size_t w = write_pos_.load(std::memory_order_acquire);
-        const size_t r = read_pos_.load(std::memory_order_relaxed);
-        return w - r;
+        return std::min(w - r, capacity_);
     }
 
     /**
