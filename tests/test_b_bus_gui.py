@@ -1,4 +1,4 @@
-﻿"""Run with python -m unittest discover -s tests -p test_b_bus_gui.py."""
+"""Run with python -m unittest discover -s tests -p test_b_bus_gui.py."""
 import os
 import sys
 from pathlib import Path

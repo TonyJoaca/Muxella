@@ -1,4 +1,4 @@
-﻿# Contributing to Muxella & Muxella
+# Contributing to Muxella
 
 Thank you for your interest in contributing to Muxella! We welcome issues, documentation improvements, and pull requests.
 

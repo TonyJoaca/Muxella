@@ -1,4 +1,4 @@
-﻿from gui.channel_enable import ChannelEnableMixin
+from gui.channel_enable import ChannelEnableMixin
 from gui.virtual_audio import device_matches, resolve_selection
 import os
 import sys

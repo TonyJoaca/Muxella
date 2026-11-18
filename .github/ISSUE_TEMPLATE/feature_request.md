@@ -1,6 +1,6 @@
-﻿---
+---
 name: Feature Request
-about: Suggest an idea or enhancement for Muxella/Muxella
+about: Suggest an idea or enhancement for Muxella
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''

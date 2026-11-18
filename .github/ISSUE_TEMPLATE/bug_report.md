@@ -1,6 +1,6 @@
-﻿---
+---
 name: Bug Report
-about: Report a bug or audio glitch to help improve Muxella/Muxella
+about: Report a bug or audio glitch to help improve Muxella
 title: '[BUG] '
 labels: bug
 assignees: ''

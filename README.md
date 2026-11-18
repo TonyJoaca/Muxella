@@ -1,4 +1,4 @@
-﻿# Muxella
+# Muxella
 
 [![CI](https://github.com/TonyJoaca/Muxella/actions/workflows/ci.yml/badge.svg)](https://github.com/TonyJoaca/Muxella/actions/workflows/ci.yml)
 [![Language](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
@@ -6,9 +6,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011%20x64-brightgreen.svg)](https://microsoft.com/windows)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3%20%2F%20MIT-blue.svg)](LICENSE)
 
-**Muxella** is a modern, high-performance, open-source virtual audio matrix router and mixing workstation engineered for Windows 10/11. Built from the ground up in C++20 using documented Windows Core Audio APIs, it provides an ultra-low latency, clean-room alternative to legacy mixing suites.
-
-**Muxella** is the cyber-themed mixing workstation frontend, providing intuitive strip-based control, real-time parametric EQ, dynamic range compression, neural noise suppression, cross-strip sidechain ducking, ITU-R BS.1770 LUFS metering, and integrated virtual audio cable routing.
+**Muxella** is a modern, high-performance, open-source virtual audio matrix router and mixing workstation engineered for Windows 10/11. Built from the ground up in C++20 using documented Windows Core Audio APIs, it pairs an ultra-low latency audio core with an intuitive mixing frontend featuring real-time parametric EQ, dynamic range compression, neural noise suppression, cross-strip sidechain ducking, ITU-R BS.1770 LUFS metering, and integrated virtual audio cable routing.
 
 ---
 
@@ -174,6 +172,6 @@ Muxella ships with `muxella_ctl.exe`, a command-line utility communicating direc
 
 ## Legal Disclaimers & Licensing
 
-- **Clean-Room Development:** Muxella and Muxella are clean-room software projects developed strictly from public specifications and documented APIs. No closed-source commercial software was disassembled, decompiled, or reverse-engineered.
-- **Trademarks:** VoiceMeeter is a registered trademark of VB-AUDIO Software. ASIO is a registered trademark of Steinberg Media Technologies GmbH. Virtual Audio Cable is a trademark of Eugene Muzychenko. Muxella and Muxella are independent projects and are not affiliated with, sponsored by, or endorsed by any of these entities. See [DISCLAIMER.md](DISCLAIMER.md) for full trademark notices.
+- **Clean-Room Development:** Muxella is a clean-room software project developed strictly from public specifications and documented APIs. No closed-source commercial software was disassembled, decompiled, or reverse-engineered.
+- **Trademarks:** VoiceMeeter is a registered trademark of VB-AUDIO Software. ASIO is a registered trademark of Steinberg Media Technologies GmbH. Virtual Audio Cable is a trademark of Eugene Muzychenko. Muxella is an independent project and is not affiliated with, sponsored by, or endorsed by any of these entities. See [DISCLAIMER.md](DISCLAIMER.md) for full trademark notices.
 - **License:** The C++ Core Audio Engine and libraries are licensed under the [MIT License](LICENSE.MIT). The complete application bundle and Python graphical interface are licensed under the [GNU General Public License v3](LICENSE).

@@ -1,6 +1,6 @@
-﻿# Third-Party Notices & Attribution
+# Third-Party Notices & Attribution
 
-Muxella and Muxella incorporate, link with, or interface with the following open-source projects:
+Muxella incorporates, links with, or interfaces with the following open-source projects:
 
 ---
 

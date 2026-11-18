@@ -1,4 +1,4 @@
-﻿"""Own the cable host without running the mixer or its USB driver elevated."""
+"""Own the cable host without running the mixer or its USB driver elevated."""
 import os
 import json
 import shutil
