@@ -37,7 +37,7 @@ jobs:
 
     - name: Run C++ Unit Tests (CTest)
       run: |
-        ctest --test-dir build --output-on-failure
+        ctest --test-dir build --output-on-failure -C Release
 
     - name: Run GUI Unit Tests
       run: |
