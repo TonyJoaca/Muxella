@@ -2711,15 +2711,19 @@ class MuxellaMainWindow(QMainWindow):
         data = self.client.get_meters()
         if not data:
             self._telemetry_misses = getattr(self, "_telemetry_misses", 0) + 1
+            self._telemetry_hits = 0
             proc_dead = self.engine_process is not None and self.engine_process.poll() is not None
-            if self._telemetry_misses >= 12 or proc_dead:  # ~400ms pipe silence or exited process
-                self._set_pill_offline()
             if self._telemetry_misses >= 15 or proc_dead:
+                self._set_pill_offline()
+            # Only trigger a hard restart if the process died or 5+ seconds of total silence
+            if proc_dead or self._telemetry_misses >= 150:
                 self._trigger_engine_watchdog()
             return
 
         self._telemetry_misses = 0
-        self._watchdog_backoff = 1.5
+        self._telemetry_hits = getattr(self, "_telemetry_hits", 0) + 1
+        if self._telemetry_hits >= 60:  # ~2 seconds of stable telemetry
+            self._watchdog_backoff = 2.0
         self._set_pill_online()
         if not self.isVisible() or self.isMinimized():
             return  # Background health polling does not update hidden meters.

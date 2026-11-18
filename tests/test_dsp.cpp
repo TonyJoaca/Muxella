@@ -1,4 +1,4 @@
-﻿#include "muxella/dsp/biquad.hpp"
+#include "muxella/dsp/biquad.hpp"
 #include "muxella/dsp/compressor.hpp"
 #include "muxella/dsp/limiter.hpp"
 #include "muxella/dsp/meter.hpp"

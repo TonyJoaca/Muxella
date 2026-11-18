@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "muxella/core/audio_device.hpp"
 #include "muxella/core/ring_buffer.hpp"

@@ -1,4 +1,4 @@
-﻿#include "muxella/usbip/win_rt_socket.hpp"
+#include "muxella/usbip/win_rt_socket.hpp"
 #include <algorithm>
 #include <cstring>
 #include <mutex>

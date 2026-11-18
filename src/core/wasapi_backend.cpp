@@ -357,6 +357,7 @@ WasapiEndpoint::~WasapiEndpoint() {
 
 bool WasapiEndpoint::start() {
     if (running_.load()) return true;
+    failed_.store(false);
     // An explicitly selected endpoint must never become the system default.
     if (info_.type == DeviceType::ProcessLoopback) {
         if (info_.target_pid == 0) return false;
@@ -374,6 +375,7 @@ bool WasapiEndpoint::start() {
 
     for (int i = 0; i < 50; ++i) {
         if (running_.load()) return true;
+        if (failed_.load()) return false;
         Sleep(10);
     }
     return running_.load();
@@ -400,6 +402,7 @@ void WasapiEndpoint::capture_thread_proc() {
     if (info_.type == DeviceType::ProcessLoopback) {
         if (!activate_process_loopback_client(info_.target_pid, info_.include_process_tree,
                                               config_.sample_rate, audio_client_, wave_format_)) {
+            failed_.store(true);
             if (co_init) CoUninitialize();
             return;
         }
@@ -409,6 +412,7 @@ void WasapiEndpoint::capture_thread_proc() {
         hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                               __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
         if (FAILED(hr)) {
+            failed_.store(true);
             std::cerr << "[Capture Error] CoCreateInstance failed: hr=0x" << std::hex << hr << std::dec << "\n";
             if (co_init) CoUninitialize();
             return;
@@ -429,6 +433,7 @@ void WasapiEndpoint::capture_thread_proc() {
         enumerator->Release();
 
         if (!device_) {
+            failed_.store(true);
             std::cerr << "[Capture Error] device_ is null\n";
             if (co_init) CoUninitialize();
             return;
@@ -437,6 +442,7 @@ void WasapiEndpoint::capture_thread_proc() {
         hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                                reinterpret_cast<void**>(&audio_client_));
         if (FAILED(hr) || !audio_client_) {
+            failed_.store(true);
             std::cerr << "[Capture Error] Activate IAudioClient failed: hr=0x" << std::hex << hr << std::dec << "\n";
             device_->Release();
             device_ = nullptr;
@@ -447,6 +453,7 @@ void WasapiEndpoint::capture_thread_proc() {
         raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
         hr = audio_client_->GetMixFormat(&wave_format_);
         if (FAILED(hr) || !wave_format_) {
+            failed_.store(true);
             std::cerr << "[Capture Error] GetMixFormat failed: hr=0x" << std::hex << hr << std::dec << "\n";
             audio_client_->Release();
             audio_client_ = nullptr;
@@ -472,13 +479,16 @@ void WasapiEndpoint::capture_thread_proc() {
     }
 
     if (FAILED(hr)) {
+        failed_.store(true);
         std::cerr << "[WasapiEndpoint Capture] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
         CoTaskMemFree(wave_format_);
         wave_format_ = nullptr;
         audio_client_->Release();
         audio_client_ = nullptr;
-        device_->Release();
-        device_ = nullptr;
+        if (device_) {
+            device_->Release();
+            device_ = nullptr;
+        }
         if (co_init) CoUninitialize();
         return;
     }
@@ -495,14 +505,17 @@ void WasapiEndpoint::capture_thread_proc() {
     }
 
     if (!capture_client_) {
+        failed_.store(true);
         CloseHandle(audio_event_);
         audio_event_ = nullptr;
         CoTaskMemFree(wave_format_);
         wave_format_ = nullptr;
         audio_client_->Release();
         audio_client_ = nullptr;
-        device_->Release();
-        device_ = nullptr;
+        if (device_) {
+            device_->Release();
+            device_ = nullptr;
+        }
         if (co_init) CoUninitialize();
         return;
     }
@@ -668,6 +681,7 @@ void WasapiEndpoint::render_thread_proc() {
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                           __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
     if (FAILED(hr)) {
+        failed_.store(true);
         if (co_init) CoUninitialize();
         return;
     }
@@ -680,6 +694,7 @@ void WasapiEndpoint::render_thread_proc() {
     enumerator->Release();
 
     if (!device_) {
+        failed_.store(true);
         if (co_init) CoUninitialize();
         return;
     }
@@ -687,6 +702,7 @@ void WasapiEndpoint::render_thread_proc() {
     hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
                            reinterpret_cast<void**>(&audio_client_));
     if (FAILED(hr) || !audio_client_) {
+        failed_.store(true);
         device_->Release();
         device_ = nullptr;
         if (co_init) CoUninitialize();
@@ -706,6 +722,7 @@ void WasapiEndpoint::render_thread_proc() {
 
     if (!exclusive_mode) {
         if (!audio_client_) {
+            failed_.store(true);
             device_->Release();
             device_ = nullptr;
             if (co_init) CoUninitialize();
@@ -714,6 +731,7 @@ void WasapiEndpoint::render_thread_proc() {
         raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
         hr = audio_client_->GetMixFormat(&wave_format_);
         if (FAILED(hr) || !wave_format_) {
+            failed_.store(true);
             audio_client_->Release();
             audio_client_ = nullptr;
             device_->Release();
@@ -732,6 +750,7 @@ void WasapiEndpoint::render_thread_proc() {
         }
 
         if (FAILED(hr)) {
+            failed_.store(true);
             std::cerr << "[WasapiEndpoint Render] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
             CoTaskMemFree(wave_format_);
             wave_format_ = nullptr;
@@ -752,6 +771,7 @@ void WasapiEndpoint::render_thread_proc() {
     audio_client_->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(&render_client_));
 
     if (!render_client_) {
+        failed_.store(true);
         CloseHandle(audio_event_);
         audio_event_ = nullptr;
         CoTaskMemFree(wave_format_);

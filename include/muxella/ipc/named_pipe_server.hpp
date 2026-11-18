@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "muxella/matrix/engine.hpp"
 #include "muxella/core/endpoint_manager.hpp"

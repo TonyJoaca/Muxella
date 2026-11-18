@@ -1,4 +1,4 @@
-﻿#include "muxella/core/wasapi_backend.hpp"
+#include "muxella/core/wasapi_backend.hpp"
 #include "muxella/core/asio_backend.hpp"
 #include "muxella/core/mmcss.hpp"
 #include "muxella/matrix/engine.hpp"

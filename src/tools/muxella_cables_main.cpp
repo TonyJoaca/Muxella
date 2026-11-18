@@ -1,4 +1,4 @@
-﻿#include "muxella/usbip/server.hpp"
+#include "muxella/usbip/server.hpp"
 #include "muxella/usbip/uac1_device.hpp"
 #include "muxella/usbip/win_rt_socket.hpp"
 

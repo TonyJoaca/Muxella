@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "muxella/core/audio_device.hpp"
 #include "muxella/core/ring_buffer.hpp"
@@ -80,6 +80,7 @@ private:
     std::shared_ptr<SpscRingBuffer<float>> ring_buffer_;
 
     std::atomic<bool> running_{false};
+    std::atomic<bool> failed_{false};
     std::atomic<bool> exclusive_active_{false};
     std::atomic<int> raw_status_{0}; // 0: not requested, 1: accepted, -1: unavailable
     std::atomic<uint32_t> device_sample_rate_{0};

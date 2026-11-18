@@ -25,13 +25,13 @@ def resolve_selection(name, endpoint_id, preferred, secondary=(), extra=()):
             for item in pool:
                 if item.get("id") == endpoint_id or item.get("id") == lookup_id:
                     return item
-        return None
     if name.strip().casefold().startswith("muxella "):
         secondary = ()  # A canonical recording choice never becomes loopback.
     for devices in (preferred, secondary, extra):
         matches = [item for item in devices if device_matches(name, item.get("name", ""))]
         if matches:
-            return matches[0] if len(matches) == 1 else None
+            exact = [item for item in matches if item.get("name", "").strip().casefold() == name.strip().casefold()]
+            return exact[0] if exact else matches[0]
     return None
 
 

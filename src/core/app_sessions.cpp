@@ -1,4 +1,4 @@
-﻿#include "muxella/core/app_sessions.hpp"
+#include "muxella/core/app_sessions.hpp"
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif

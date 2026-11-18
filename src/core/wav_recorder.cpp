@@ -1,4 +1,4 @@
-﻿#include "muxella/core/wav_recorder.hpp"
+#include "muxella/core/wav_recorder.hpp"
 #include "muxella/core/ring_buffer.hpp"
 #ifndef NOMINMAX
 #define NOMINMAX
