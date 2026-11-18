@@ -16,7 +16,7 @@
   - Master bus summing accumulators with zero-latency soft-knee saturation limiters ($-0.1\,\text{dBFS}$ ceiling) to prevent digital wrap/clipping.
 - **Hardware Integration:** ASIO 2.0 driver scanning and interface abstraction.
 - **Telemetry & Metering:** Lock-free, real-time Peak, RMS, and Gain Reduction meters with smooth decay ballistics.
-- **Decoupled Control & IPC:** Windows Named Pipe (`\\.\pipe\MetVoice_Control`) interface for external GUIs, automation scripts, and command-line monitoring.
+- **Decoupled Control & IPC:** Windows Named Pipe (`\\.\pipe\Muxella_Control`) interface for external GUIs, automation scripts, and command-line monitoring.
 
 ---
 

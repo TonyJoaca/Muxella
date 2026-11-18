@@ -17,13 +17,17 @@ def device_matches(selected, present):
                                     "(" + selected + ")" in present)
 
 
-def resolve_selection(name, endpoint_id, preferred, secondary=()):
+def resolve_selection(name, endpoint_id, preferred, secondary=(), extra=()):
     if endpoint_id:
-        return next((item for item in list(preferred) + list(secondary)
-                     if item.get("id") == endpoint_id), None)
+        lookup_id = endpoint_id[len("exclusive:"):] if endpoint_id.startswith("exclusive:") else endpoint_id
+        for pool in (list(preferred) + list(secondary), list(extra)):
+            for item in pool:
+                if item.get("id") == endpoint_id or item.get("id") == lookup_id:
+                    return item
+        return None
     if name.strip().casefold().startswith("muxella "):
         secondary = ()  # A canonical recording choice never becomes loopback.
-    for devices in (preferred, secondary):
+    for devices in (preferred, secondary, extra):
         matches = [item for item in devices if device_matches(name, item.get("name", ""))]
         if matches:
             return matches[0] if len(matches) == 1 else None

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QSlider, QFrame, QGroupBox, QPlainTextEdit,
     QCheckBox, QScrollArea, QSplitter, QApplication, QMenu, QLineEdit,
-    QFileDialog, QSystemTrayIcon
+    QFileDialog, QSystemTrayIcon, QInputDialog
 )
 
 if sys.platform == "win32":
@@ -184,13 +184,133 @@ def set_start_with_windows(enable: bool) -> bool:
 from .widgets import BlockyVuMeter, BlockyKnob, CyberSlider, DbScaleWidget, CrtScanlineOverlay, CyberEqButton
 from .eq_dialog import CyberEqualizerDialog
 from .engine_dialog import AudioEngineConfigDialog
-from .pipe_client import MetVoicePipeClient
+from .pipe_client import MuxellaPipeClient
 from .theme import (
     ACCENT_PURPLE, ACCENT_GREEN, ACCENT_CYAN, ACCENT_MAGENTA, ACCENT_RED,
     TEXT_PRIMARY, TEXT_MUTED, TEXT_DIM, BG_BLACK, SURFACE_CARD, SURFACE_VIRTUAL,
     SURFACE_MASTER, BORDER_OUTLINE, BORDER_STRIP, BORDER_STRIP_HOVER, BORDER_SUBTLE,
     FONT_PIXEL, FONT_BODY, get_resource_dir
 )
+
+
+_DUCK_STRIP_LABELS = ["M1", "M2", "M3", "M4", "M5", "V1", "V2", "V3"]
+
+
+def _attach_input_selection(strip_obj, dev_name: str):
+    cleaned = (dev_name.replace("[WDM] ", "").replace("[VAIO] ", "")
+               .replace("[APP] ", "").replace("[ASIO] ", "").strip())
+    from gui.virtual_audio import migrate_device_name
+    cleaned = migrate_device_name(cleaned)
+    dev_btn = getattr(strip_obj, "dev_btn", None)
+    selected_id = getattr(dev_btn, "selected_device_id", None)
+    if selected_id is None and dev_name.startswith("[APP] "):
+        selected_id = f"app:{cleaned}"
+    elif selected_id is None and dev_name.startswith("[ASIO] "):
+        selected_id = f"asio:{cleaned}"
+    strip_obj.cached_device_id = selected_id
+    if cleaned in ("Select Device", "None", "") or "Disconnect" in cleaned:
+        strip_obj.cached_device = None
+        strip_obj.cached_device_id = None
+        strip_obj.client.send_command(f"detach_input {strip_obj.strip_id}")
+        strip_obj.set_device_connected(True)
+        return
+    strip_obj.cached_device = cleaned
+    if not getattr(strip_obj, "processing_enabled", True):
+        strip_obj.set_device_connected(True)
+        return
+    strip_obj._attach_retry_at = 0
+    devs = strip_obj.get_devices_func() or {}
+    extra = list(devs.get("apps", [])) + list(devs.get("asios", []))
+    device = resolve_selection(cleaned, strip_obj.cached_device_id,
+                               devs.get("captures", []), devs.get("renders", []), extra=extra)
+    if device:
+        endpoint_id = device.get("id")
+        strip_obj.cached_device_id = endpoint_id
+        if dev_btn is not None:
+            dev_btn.selected_device_id = endpoint_id
+        if endpoint_id and (endpoint_id.startswith("app:") or endpoint_id.startswith("asio:")):
+            query = endpoint_id
+        elif endpoint_id:
+            query = "id:" + endpoint_id
+        else:
+            query = device["name"]
+        attached = strip_obj.client.attach_input(strip_obj.strip_id, query)
+        if attached is not None:
+            strip_obj.set_device_connected(attached)
+        strip_obj.log_callback(f"Device connection requested: {device['name']}")
+    else:
+        strip_obj.client.send_command(f"detach_input {strip_obj.strip_id}")
+        strip_obj.set_device_connected(False)
+        strip_obj.log_callback(f"Selected device unavailable or ambiguous: {cleaned}")
+
+
+def _open_duck_trigger_menu(parent: QWidget, global_pos: QPoint, current_trigger: int,
+                            self_strip_id: int, on_selected):
+    menu = QMenu(parent)
+    menu.setStyleSheet(f"""
+        QMenu {{
+            background-color: #080110;
+            border: 1.5px solid {ACCENT_PURPLE};
+            color: {TEXT_PRIMARY};
+            padding: 4px;
+            font-size: 8pt;
+            font-family: Consolas, monospace;
+        }}
+        QMenu::item {{ padding: 4px 12px; }}
+        QMenu::item:selected {{ background-color: #24083b; color: {ACCENT_GREEN}; }}
+    """)
+    hdr = menu.addAction("--- SIDECHAIN KEY STRIP ---")
+    hdr.setEnabled(False)
+    for idx, label in enumerate(_DUCK_STRIP_LABELS):
+        if idx == self_strip_id:
+            continue
+        act = menu.addAction(f"Trigger from {label} (Strip {idx + 1})")
+        act.setCheckable(True)
+        act.setChecked(idx == current_trigger)
+        act.triggered.connect(lambda _, i=idx: on_selected(i))
+    menu.exec(global_pos)
+
+
+class DelayPillButton(QPushButton):
+    def __init__(self, bus_code: str, on_delay_changed, border_col: str, text_col: str, parent=None):
+        super().__init__("DLY 0ms", parent)
+        self.bus_code = bus_code
+        self.on_delay_changed = on_delay_changed
+        self.delay_ms = 0.0
+        self._border_col = border_col
+        self._text_col = text_col
+        self.setFixedHeight(17)
+        self.setToolTip("Lip-sync output delay (0–200 ms)\nClick to enter ms | Wheel to step ±5 ms | Right-click to reset")
+        self.clicked.connect(self._prompt_delay)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda _: self.set_delay_ms(0.0, emit=True))
+        self._refresh_style()
+
+    def set_delay_ms(self, ms: float, emit: bool = False):
+        self.delay_ms = max(0.0, min(200.0, float(ms)))
+        self.setText(f"DLY {int(round(self.delay_ms))}ms")
+        self._refresh_style()
+        if emit and self.on_delay_changed:
+            self.on_delay_changed(self.delay_ms)
+
+    def _refresh_style(self):
+        if self.delay_ms > 0.05:
+            self.setStyleSheet(f"background-color: #082630; color: {ACCENT_CYAN}; border: 1px solid {ACCENT_CYAN}; font-size: 6.5pt; font-weight: bold; padding: 0px;")
+        else:
+            self.setStyleSheet(f"color: {self._text_col}; font-size: 6.5pt; border: 1px solid {self._border_col}; padding: 0px;")
+
+    def _prompt_delay(self):
+        val, ok = QInputDialog.getInt(
+            self, f"Lip-Sync Delay [{self.bus_code}]",
+            "Output Delay (0 – 200 ms):", int(round(self.delay_ms)), 0, 200, 1
+        )
+        if ok:
+            self.set_delay_ms(float(val), emit=True)
+
+    def wheelEvent(self, event):
+        delta = 5.0 if event.angleDelta().y() > 0 else -5.0
+        self.set_delay_ms(self.delay_ms + delta, emit=True)
+        event.accept()
 
 
 class EditableTitle(QLineEdit):
@@ -529,8 +649,27 @@ class DeviceSelectorButton(QPushButton):
                     act = menu.addAction(device_label("[VAIO]", dev))
                     act.triggered.connect(lambda _, n=d_name, endpoint_id=dev.get("id"): self._handle_selection(n, endpoint_id))
 
+            ex_pool = hw_renders if hw_renders else renders
+            if ex_pool:
+                ex_menu = menu.addMenu("WASAPI Exclusive Mode (Hardware)")
+                for dev in ex_pool:
+                    d_name = dev.get("name", "Audio Device")
+                    ex_id = ("exclusive:" + dev["id"]) if dev.get("id") else None
+                    act = ex_menu.addAction(device_label("[EX]", dev))
+                    act.triggered.connect(lambda _, n="[EX] " + d_name, endpoint_id=ex_id: self._handle_selection(n, endpoint_id))
+
+            asios = devices_data.get("asios", []) if devices_data else []
+            if asios:
+                menu.addSeparator()
+                hdr_asio = menu.addAction("--- ASIO HARDWARE DRIVERS ---")
+                hdr_asio.setEnabled(False)
+                for drv in asios:
+                    d_name = drv.get("name", "ASIO Driver")
+                    act = menu.addAction(f"[ASIO] {d_name}")
+                    act.triggered.connect(lambda _, n="[ASIO] " + d_name, endpoint_id=drv.get("id"): self._handle_selection(n, endpoint_id))
+
         else:
-            # Input Strips: Recording Hardware & Virtual Playback Loopback
+            # Input Strips: Recording Hardware, Virtual Playback Loopback, App Loopback, & ASIO
             captures = devices_data.get("captures", []) if devices_data else []
             if not captures:
                 captures = [
@@ -556,6 +695,26 @@ class DeviceSelectorButton(QPushButton):
                     d_name = dev.get("name", "Audio Device")
                     act = menu.addAction(device_label("[VAIO]", dev))
                     act.triggered.connect(lambda _, n=d_name, endpoint_id=dev.get("id"): self._handle_selection(n, endpoint_id))
+
+            apps = devices_data.get("apps", []) if devices_data else []
+            if apps:
+                menu.addSeparator()
+                hdr_app = menu.addAction("--- APP LOOPBACK (PER-APP CAPTURE) ---")
+                hdr_app.setEnabled(False)
+                for app in apps:
+                    a_name = app.get("name", "Application")
+                    act = menu.addAction(f"[APP] {a_name}")
+                    act.triggered.connect(lambda _, n="[APP] " + a_name, endpoint_id=app.get("id"): self._handle_selection(n, endpoint_id))
+
+            asios = devices_data.get("asios", []) if devices_data else []
+            if asios:
+                menu.addSeparator()
+                hdr_asio = menu.addAction("--- ASIO HARDWARE DRIVERS ---")
+                hdr_asio.setEnabled(False)
+                for drv in asios:
+                    d_name = drv.get("name", "ASIO Driver")
+                    act = menu.addAction(f"[ASIO] {d_name}")
+                    act.triggered.connect(lambda _, n="[ASIO] " + d_name, endpoint_id=drv.get("id"): self._handle_selection(n, endpoint_id))
 
         menu.addSeparator()
         disc_act = menu.addAction("[X] - Disconnect Device -")
@@ -595,7 +754,7 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
     - Discrete dB Scale Markings (+12, 0, -10, -20, -40, -inf)
     - Decoupled Mute button (outlined neutral until engaged red glow)
     """
-    def __init__(self, strip_id: int, default_title: str, default_dev: str, client: MetVoicePipeClient, get_devices_func, log_callback, parent=None):
+    def __init__(self, strip_id: int, default_title: str, default_dev: str, client: MuxellaPipeClient, get_devices_func, log_callback, parent=None):
         super().__init__(parent)
         self.strip_id = strip_id
         self.title = default_title
@@ -604,6 +763,7 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
         self.log_callback = log_callback
         self.cached_device: Optional[str] = None
         self.is_offline: bool = False
+        self.duck_trigger: int = 1 if strip_id == 0 else 0
 
         self.setFixedWidth(118)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -664,6 +824,26 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
         self.rev_knob.valueChanged.connect(self._on_reverb_changed)
         knobs_row2.addWidget(self.rev_knob)
         fx_container.addLayout(knobs_row2)
+
+        knobs_row3 = QHBoxLayout()
+        knobs_row3.setSpacing(4)
+        self.duck_knob = BlockyKnob("DUCK", 0.0, 10.0, default_val=0.0, step=0.1, parent=self)
+        self.duck_knob.setToolTip("Sidechain auto-ducking (0=Off) | Right-click DUCK or click KEY to pick trigger strip")
+        self.duck_knob.valueChanged.connect(self._on_duck_changed)
+        self.duck_knob.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.duck_knob.customContextMenuRequested.connect(
+            lambda pos: _open_duck_trigger_menu(self, self.duck_knob.mapToGlobal(pos), self.duck_trigger, self.strip_id, self._set_duck_trigger))
+        knobs_row3.addWidget(self.duck_knob)
+
+        self.duck_trig_btn = QPushButton(f"KEY:{_DUCK_STRIP_LABELS[self.duck_trigger]}")
+        self.duck_trig_btn.setFixedSize(46, 20)
+        self.duck_trig_btn.setToolTip("Choose which strip triggers sidechain ducking on this channel")
+        self.duck_trig_btn.setStyleSheet(f"font-size: 6.5pt; padding: 0px; color: {TEXT_MUTED}; border: 1px solid #2B0C47;")
+        self.duck_trig_btn.clicked.connect(
+            lambda: _open_duck_trigger_menu(self, self.duck_trig_btn.mapToGlobal(QPoint(0, self.duck_trig_btn.height())),
+                                            self.duck_trigger, self.strip_id, self._set_duck_trigger))
+        knobs_row3.addWidget(self.duck_trig_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        fx_container.addLayout(knobs_row3)
 
         layout.addLayout(fx_container)
 
@@ -841,35 +1021,7 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
                 self.dev_btn.set_offline_state(False)
 
     def _on_device_selected(self, dev_name: str):
-        cleaned = dev_name.replace("[WDM] ", "").replace("[VAIO] ", "").strip()
-        from gui.virtual_audio import migrate_device_name
-        cleaned = migrate_device_name(cleaned)
-        self.cached_device_id = self.dev_btn.selected_device_id
-        if cleaned in ("Select Device", "None", "") or "Disconnect" in cleaned:
-            self.cached_device = None
-            self.cached_device_id = None
-            self.client.send_command(f"detach_input {self.strip_id}")
-            self.set_device_connected(True)
-            return
-        self.cached_device = cleaned
-        if not self.processing_enabled:
-            self.set_device_connected(True)
-            return
-        self._attach_retry_at = 0
-        devs = self.get_devices_func() or {}
-        device = resolve_selection(cleaned, self.cached_device_id, devs.get("captures", []), devs.get("renders", []))
-        if device:
-            self.cached_device_id = device.get("id")
-            self.dev_btn.selected_device_id = self.cached_device_id
-            query = "id:" + self.cached_device_id if self.cached_device_id else device["name"]
-            attached = self.client.attach_input(self.strip_id, query)
-            if attached is not None:
-                self.set_device_connected(attached)
-            self.log_callback(f"Device connection requested: {device['name']}")
-        else:
-            self.client.send_command(f"detach_input {self.strip_id}")
-            self.set_device_connected(False)
-            self.log_callback(f"Selected device unavailable or ambiguous: {cleaned}")
+        _attach_input_selection(self, dev_name)
 
     def _on_route_clicked(self, bus_idx: int, enabled: bool):
         self.client.set_route(self.strip_id, bus_idx, enabled, 0.0)
@@ -924,6 +1076,16 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
         self.client.set_reverb(self.strip_id, val)
         self.log_callback(f"{self.title} Reverb: {val:.1f}")
 
+    def _set_duck_trigger(self, trig_idx: int):
+        if 0 <= trig_idx < len(_DUCK_STRIP_LABELS) and trig_idx != self.strip_id:
+            self.duck_trigger = trig_idx
+            self.duck_trig_btn.setText(f"KEY:{_DUCK_STRIP_LABELS[trig_idx]}")
+            self.client.set_duck(self.strip_id, self.duck_trigger if self.duck_knob.value > 0.01 else -1, self.duck_knob.value)
+
+    def _on_duck_changed(self, val: float):
+        self.client.set_duck(self.strip_id, self.duck_trigger if val > 0.01 else -1, val)
+        self.log_callback(f"{self.title} Sidechain Duck ({_DUCK_STRIP_LABELS[self.duck_trigger]}): {val:.1f}")
+
     def get_state(self) -> Dict[str, Any]:
         return {
             "enabled": self.processing_enabled,
@@ -934,6 +1096,8 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
             "gate": float(self.gate_knob.value),
             "denoise": float(self.denoise_knob.value),
             "reverb": float(self.rev_knob.value),
+            "duck_amount": float(self.duck_knob.value),
+            "duck_trigger": int(self.duck_trigger),
             "gain_db": self.fader.value() / 10.0,
             "routes": [btn.isChecked() for btn in self.route_buttons],
             "mono": self.mono_btn.isChecked(),
@@ -968,6 +1132,14 @@ class PhysicalInputStrip(ChannelEnableMixin, QFrame):
             r = float(state["reverb"])
             self.rev_knob.set_value(r)
             self._on_reverb_changed(r)
+
+        if "duck_trigger" in state:
+            self._set_duck_trigger(int(state["duck_trigger"]))
+
+        if "duck_amount" in state:
+            da = float(state["duck_amount"])
+            self.duck_knob.set_value(da)
+            self._on_duck_changed(da)
 
         if "gain_db" in state:
             gain = float(state["gain_db"])
@@ -1015,7 +1187,7 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
     - Elongated Fader travel with dB markings & double-click reset
     - Outlined MUTE button (engages solid red neon glow only when active)
     """
-    def __init__(self, strip_id: int, default_title: str, default_dev: str, client: MetVoicePipeClient, get_devices_func, log_callback, parent=None):
+    def __init__(self, strip_id: int, default_title: str, default_dev: str, client: MuxellaPipeClient, get_devices_func, log_callback, parent=None):
         super().__init__(parent)
         self.strip_id = strip_id
         self.title = default_title
@@ -1024,6 +1196,7 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
         self.log_callback = log_callback
         self.cached_device = default_dev
         self.is_offline = False
+        self.duck_trigger: int = 0
 
         self.setFixedWidth(118)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -1078,6 +1251,14 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
         self.treble_knob = BlockyKnob("TREBLE", -12.0, 12.0, default_val=0.0, step=0.5, unit="dB", parent=self)
         self.treble_knob.valueChanged.connect(self._on_eq_changed)
         eq_box2.addWidget(self.treble_knob)
+
+        self.duck_knob = BlockyKnob("DUCK", 0.0, 10.0, default_val=0.0, step=0.1, parent=self)
+        self.duck_knob.setToolTip("Sidechain auto-ducking (0=Off) | Right-click to choose key strip (default M1)")
+        self.duck_knob.valueChanged.connect(self._on_duck_changed)
+        self.duck_knob.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.duck_knob.customContextMenuRequested.connect(
+            lambda pos: _open_duck_trigger_menu(self, self.duck_knob.mapToGlobal(pos), self.duck_trigger, self.strip_id, self._set_duck_trigger))
+        eq_box2.addWidget(self.duck_knob)
         layout.addLayout(eq_box2)
 
         # Balance / Pan Slider with double-click reset to Center
@@ -1272,41 +1453,22 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
                 self.dev_btn.set_offline_state(False)
 
     def _on_device_selected(self, dev_name: str):
-        cleaned = dev_name.replace("[WDM] ", "").replace("[VAIO] ", "").strip()
-        from gui.virtual_audio import migrate_device_name
-        cleaned = migrate_device_name(cleaned)
-        self.cached_device_id = self.dev_btn.selected_device_id
-        if cleaned in ("Select Device", "None", "") or "Disconnect" in cleaned:
-            self.cached_device = None
-            self.cached_device_id = None
-            self.client.send_command(f"detach_input {self.strip_id}")
-            self.set_device_connected(True)
-            return
-        self.cached_device = cleaned
-        if not self.processing_enabled:
-            self.set_device_connected(True)
-            return
-        self._attach_retry_at = 0
-        devs = self.get_devices_func() or {}
-        device = resolve_selection(cleaned, self.cached_device_id, devs.get("captures", []), devs.get("renders", []))
-        if device:
-            self.cached_device_id = device.get("id")
-            self.dev_btn.selected_device_id = self.cached_device_id
-            query = "id:" + self.cached_device_id if self.cached_device_id else device["name"]
-            attached = self.client.attach_input(self.strip_id, query)
-            if attached is not None:
-                self.set_device_connected(attached)
-            self.log_callback(f"Device connection requested: {device['name']}")
-        else:
-            self.client.send_command(f"detach_input {self.strip_id}")
-            self.set_device_connected(False)
-            self.log_callback(f"Selected device unavailable or ambiguous: {cleaned}")
+        _attach_input_selection(self, dev_name)
 
     def _on_eq_changed(self):
         low = self.bass_knob.value
         mid = self.mid_knob.value
         high = self.treble_knob.value
         self.client.set_eq(self.strip_id, low, mid, high)
+
+    def _set_duck_trigger(self, trig_idx: int):
+        if 0 <= trig_idx < len(_DUCK_STRIP_LABELS) and trig_idx != self.strip_id:
+            self.duck_trigger = trig_idx
+            self.client.set_duck(self.strip_id, self.duck_trigger if self.duck_knob.value > 0.01 else -1, self.duck_knob.value)
+
+    def _on_duck_changed(self, val: float):
+        self.client.set_duck(self.strip_id, self.duck_trigger if val > 0.01 else -1, val)
+        self.log_callback(f"{self.title} Sidechain Duck ({_DUCK_STRIP_LABELS[self.duck_trigger]}): {val:.1f}")
 
     def _on_route_clicked(self, bus_idx: int, enabled: bool):
         self.client.set_route(self.strip_id, bus_idx, enabled, 0.0)
@@ -1354,6 +1516,8 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
             "bass": float(self.bass_knob.value),
             "mid": float(self.mid_knob.value),
             "treble": float(self.treble_knob.value),
+            "duck_amount": float(self.duck_knob.value),
+            "duck_trigger": int(self.duck_trigger),
             "pan": float(self.pan_slider.value()),
             "gain_db": self.fader.value() / 10.0,
             "routes": [btn.isChecked() for btn in self.route_buttons],
@@ -1378,6 +1542,14 @@ class VirtualInputStrip(ChannelEnableMixin, QFrame):
             self.mid_knob.set_value(m)
             self.treble_knob.set_value(tr)
             self._on_eq_changed()
+
+        if "duck_trigger" in state:
+            self._set_duck_trigger(int(state["duck_trigger"]))
+
+        if "duck_amount" in state:
+            da = float(state["duck_amount"])
+            self.duck_knob.set_value(da)
+            self._on_duck_changed(da)
 
         if "pan" in state:
             p = int(round(float(state["pan"])))
@@ -1429,7 +1601,7 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
     - Decoupled Mute button (starts engaged red for safety, transitions to neutral when active)
     """
     def __init__(self, bus_id: int, bus_code: str, default_name: str, is_virtual: bool,
-                 client: MetVoicePipeClient, get_devices_func, log_callback, parent=None):
+                 client: MuxellaPipeClient, get_devices_func, log_callback, parent=None):
         super().__init__(parent)
         self.bus_id = bus_id
         self.bus_code = bus_code
@@ -1540,6 +1712,12 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
         self.gain_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         fader_col.addWidget(self.gain_lbl)
 
+        self.lufs_lbl = QLabel("-inf LUFS")
+        self.lufs_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 6.5pt; font-family: Consolas, monospace;")
+        self.lufs_lbl.setToolTip("ITU-R BS.1770 Momentary Loudness (LUFS)")
+        self.lufs_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        fader_col.addWidget(self.lufs_lbl)
+
         fader_row.addLayout(fader_col)
         layout.addLayout(fader_row, stretch=1)
 
@@ -1558,6 +1736,16 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
         self.limiter_btn.setStyleSheet(f"color: {text_col}; font-size: 6.5pt; border: 1px solid {border_col}; padding: 1px;")
         self.limiter_btn.clicked.connect(self._on_limiter_clicked)
         layout.addWidget(self.limiter_btn)
+
+        self.delay_btn = DelayPillButton(bus_code, self._on_delay_changed, border_col, text_col, self)
+        layout.addWidget(self.delay_btn)
+
+    def _on_delay_changed(self, delay_ms: float):
+        self.client.set_bus_delay(self.bus_id, delay_ms)
+        self.log_callback(f"Master Bus [{self.bus_code}] Delay: {delay_ms:.0f} ms")
+
+    def set_lufs(self, lufs_m: float):
+        self.lufs_lbl.setText(f"{lufs_m:.1f} LUFS" if lufs_m > -69.5 else "-inf LUFS")
 
     def _on_limiter_clicked(self, enabled):
         self.limiter_btn.setText("LIMITER ON" if enabled else "LIMITER OFF")
@@ -1607,10 +1795,20 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
                 self.dev_btn.set_offline_state(False)
 
     def _on_device_selected(self, dev_name: str):
-        cleaned = dev_name.replace("[WDM] ", "").replace("[VAIO] ", "").strip()
+        is_ex = dev_name.startswith("[EX] ")
+        is_asio = dev_name.startswith("[ASIO] ")
+        cleaned = (dev_name.replace("[WDM] ", "").replace("[VAIO] ", "")
+                   .replace("[EX] ", "").replace("[ASIO] ", "").strip())
         from gui.virtual_audio import migrate_device_name
         cleaned = migrate_device_name(cleaned)
-        self.cached_device_id = self.dev_btn.selected_device_id
+        selected_id = getattr(self.dev_btn, "selected_device_id", None)
+        if selected_id and selected_id.startswith("exclusive:"):
+            is_ex = True
+        if selected_id and selected_id.startswith("asio:"):
+            is_asio = True
+        if selected_id is None and is_asio:
+            selected_id = f"asio:{cleaned}"
+        self.cached_device_id = selected_id
         if cleaned in ("Select Device", "None", "") or "Disconnect" in cleaned:
             self.cached_device = None
             self.cached_device_id = None
@@ -1623,11 +1821,23 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
             return
         self._attach_retry_at = 0
         devs = self.get_devices_func() or {}
-        device = resolve_selection(cleaned, self.cached_device_id, devs.get("renders", []), [])
+        device = resolve_selection(cleaned, self.cached_device_id, devs.get("renders", []), [],
+                                   extra=devs.get("asios", []))
         if device:
-            self.cached_device_id = device.get("id")
+            raw_id = device.get("id")
+            if raw_id and raw_id.startswith("asio:"):
+                self.cached_device_id = raw_id
+                query = raw_id
+            elif is_ex and raw_id:
+                self.cached_device_id = "exclusive:" + raw_id
+                query = "exclusive:id:" + raw_id
+            elif is_ex:
+                self.cached_device_id = None
+                query = "exclusive:" + device["name"]
+            else:
+                self.cached_device_id = raw_id
+                query = "id:" + raw_id if raw_id else device["name"]
             self.dev_btn.selected_device_id = self.cached_device_id
-            query = "id:" + self.cached_device_id if self.cached_device_id else device["name"]
             attached = self.client.attach_output(self.bus_id, query)
             if attached is not None:
                 self.set_device_connected(attached)
@@ -1748,6 +1958,7 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
             "gain_db": self.fader.value() / 10.0,
             "mute": self.mute_btn.isChecked(),
             "limiter": self.limiter_btn.isChecked(),
+            "delay_ms": float(self.delay_btn.delay_ms),
             "eq": eq_state
         }
 
@@ -1756,6 +1967,7 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
         limiter = bool(state.get("limiter", False))
         self.limiter_btn.setChecked(limiter)
         self._on_limiter_clicked(limiter)
+        self.delay_btn.set_delay_ms(float(state.get("delay_ms", 0.0)), emit=True)
 
         if "name" in state:
             n = str(state["name"])
@@ -1838,11 +2050,13 @@ class MuxellaMainWindow(QMainWindow):
         self.resize(1640, 840)
         self.setMinimumSize(960, 600)
 
-        self.client = MetVoicePipeClient()
+        self.client = MuxellaPipeClient()
         self.engine_process = None
         self._cached_devices = None
         self._force_relaunch = False
         self._pill_is_online = None
+        self._watchdog_next_at = 0.0
+        self._watchdog_backoff = 1.5
         self.apps_panel = None
         self.recording_panel = None
         self.recording_preferences = {}
@@ -2047,10 +2261,12 @@ class MuxellaMainWindow(QMainWindow):
 
     def _check_and_reconnect_devices(self, devs: Dict[str, Any]):
         captures, renders = devs.get("captures", []), devs.get("renders", [])
-        groups = [(getattr(self, "physical_strips", []), "input", captures, renders),
-                  (getattr(self, "virtual_strips", []), "input", captures, renders),
-                  (getattr(self, "master_buses", []), "output", renders, [])]
-        for strips, kind, preferred, secondary in groups:
+        in_extra = list(devs.get("apps", [])) + list(devs.get("asios", []))
+        out_extra = list(devs.get("asios", []))
+        groups = [(getattr(self, "physical_strips", []), "input", captures, renders, in_extra),
+                  (getattr(self, "virtual_strips", []), "input", captures, renders, in_extra),
+                  (getattr(self, "master_buses", []), "output", renders, [], out_extra)]
+        for strips, kind, preferred, secondary, extra in groups:
             names = devs.get("attached_inputs" if kind == "input" else "attached_outputs", [])
             ids = devs.get("attached_input_ids" if kind == "input" else "attached_output_ids", [])
             for strip in strips:
@@ -2060,10 +2276,24 @@ class MuxellaMainWindow(QMainWindow):
                 if not selected or selected in ("Select Device", "None"):
                     continue
                 index = strip.strip_id if kind == "input" else strip.bus_id
-                device = resolve_selection(selected, getattr(strip, "cached_device_id", None), preferred, secondary)
+                cur_cached_id = getattr(strip, "cached_device_id", None)
+                is_exclusive = bool(kind == "output" and cur_cached_id and cur_cached_id.startswith("exclusive:"))
+                device = resolve_selection(selected, cur_cached_id, preferred, secondary, extra=extra)
                 attached_id = ids[index] if index < len(ids) else ""
                 if device:
-                    endpoint_id = device.get("id")
+                    raw_id = device.get("id")
+                    if is_exclusive and raw_id:
+                        endpoint_id = "exclusive:" + raw_id
+                        query = "exclusive:id:" + raw_id
+                    elif raw_id and (raw_id.startswith("app:") or raw_id.startswith("asio:")):
+                        endpoint_id = raw_id
+                        query = raw_id
+                    elif raw_id:
+                        endpoint_id = raw_id
+                        query = "id:" + raw_id
+                    else:
+                        endpoint_id = None
+                        query = ("exclusive:" if is_exclusive else "") + device["name"]
                     strip.cached_device_id = endpoint_id
                     strip.dev_btn.selected_device_id = endpoint_id
                     attached = bool(endpoint_id and attached_id == endpoint_id)
@@ -2073,7 +2303,6 @@ class MuxellaMainWindow(QMainWindow):
                         import time
                         if time.monotonic() < getattr(strip, "_attach_retry_at", 0):
                             continue
-                        query = "id:" + endpoint_id if endpoint_id else device["name"]
                         attach = self.client.attach_input if kind == "input" else self.client.attach_output
                         attach(index, query)
                 else:
@@ -2445,15 +2674,41 @@ class MuxellaMainWindow(QMainWindow):
         self.terminal.appendPlainText(f"{now_str} - muxella.ui - {text}")
         self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
 
+    def _trigger_engine_watchdog(self):
+        import time
+        if self._restart_pending or self._is_quitting or time.monotonic() < self._watchdog_next_at:
+            return
+        self._restart_pending = True
+        self._watchdog_next_at = time.monotonic() + self._watchdog_backoff
+        self._watchdog_backoff = min(15.0, self._watchdog_backoff * 1.8)
+        self.log_message("Watchdog: Audio engine offline — attempting automatic restart and state recovery...")
+        def recover():
+            self._force_relaunch = False
+            ok = self._ensure_engine_running(client=self.client.raw)
+            return bool(ok and self.client.raw.send_command("status", timeout=1.0))
+        self.client.submit_task("watchdog-restart", recover)
+
+    def sync_all_state_to_engine(self):
+        for s in self.physical_strips:
+            s.set_state(s.get_state())
+        for s in self.virtual_strips:
+            s.set_state(s.get_state())
+        for b in self.master_buses:
+            b.set_state(b.get_state())
+
     def _poll_telemetry(self):
         data = self.client.get_meters()
         if not data:
             self._telemetry_misses = getattr(self, "_telemetry_misses", 0) + 1
-            if self._telemetry_misses >= 12:  # ~400ms of sustained pipe silence
+            proc_dead = self.engine_process is not None and self.engine_process.poll() is not None
+            if self._telemetry_misses >= 12 or proc_dead:  # ~400ms pipe silence or exited process
                 self._set_pill_offline()
+            if self._telemetry_misses >= 15 or proc_dead:
+                self._trigger_engine_watchdog()
             return
 
         self._telemetry_misses = 0
+        self._watchdog_backoff = 1.5
         self._set_pill_online()
         if not self.isVisible() or self.isMinimized():
             return  # Background health polling does not update hidden meters.
@@ -2478,6 +2733,7 @@ class MuxellaMainWindow(QMainWindow):
             pl = b_info.get("peak_l", -60.0)
             pr = b_info.get("peak_r", -60.0)
             self.master_buses[j].meter.set_levels(pl, pr)
+            self.master_buses[j].set_lufs(float(b_info.get("lufs_m", -70.0)))
 
     def _reset_meters(self):
         for s in self.physical_strips:
@@ -2644,6 +2900,8 @@ class MuxellaMainWindow(QMainWindow):
             s._on_denoise_changed(0.0)
             s.rev_knob.set_value(0.0)
             s._on_reverb_changed(0.0)
+            s.duck_knob.set_value(0.0)
+            s._on_duck_changed(0.0)
 
         for s in self.virtual_strips:
             s.fader.setValue(0)
@@ -2660,10 +2918,13 @@ class MuxellaMainWindow(QMainWindow):
             s.mid_knob.set_value(0.0)
             s.treble_knob.set_value(0.0)
             s._on_eq_changed()
+            s.duck_knob.set_value(0.0)
+            s._on_duck_changed(0.0)
 
         for b in self.master_buses:
             b.limiter_btn.setChecked(False)
             b._on_limiter_clicked(False)
+            b.delay_btn.set_delay_ms(0.0, emit=True)
             b.fader.setValue(0)
             b._on_fader_changed(0)
             b.mute_btn.setChecked(False)
@@ -3002,11 +3263,14 @@ class MuxellaMainWindow(QMainWindow):
         if name == "start-engine":
             self._restart_pending = False
             self.log_message("Audio engine ready." if result is True else f"Audio engine startup failed: {result}")
-        elif name == "restart-engine":
+        elif name in ("restart-engine", "watchdog-restart"):
             self._restart_pending = False
             if result is True:
-                self.load_settings()
-                self.log_message("Audio engine restarted and settings restored.")
+                self._telemetry_misses = 0
+                self._watchdog_backoff = 1.5
+                self.sync_all_state_to_engine()
+                self.log_message("Audio engine recovered and mixer state re-synced." if name == "watchdog-restart"
+                                 else "Audio engine restarted and live mixer state restored.")
             else:
                 self.log_message(f"Audio engine restart failed: {result}")
         elif name == "cable-depth":

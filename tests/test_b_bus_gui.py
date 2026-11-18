@@ -26,6 +26,9 @@ class Client:
     def send_command(self, command):
         self.commands.append(command)
 
+    def set_bus_delay(self, bus_idx, delay_ms):
+        self.commands.append(f"bus_delay {bus_idx} {delay_ms:.1f}")
+
 
 class BusDeviceTests(unittest.TestCase):
     @classmethod
@@ -109,6 +112,35 @@ class BusDeviceTests(unittest.TestCase):
                                 ('invalid response', False)]:
             client.send_command = lambda command, value=reply: value
             self.assertEqual(client.attach_output(5, "MetVoice Out B1"), expected)
+
+    def test_app_loopback_asio_and_exclusive_selection(self):
+        self.devices["apps"] = [{"pid": 4321, "id": "app:Discord.exe", "name": "Discord.exe"}]
+        self.devices["asios"] = [{"id": "asio:Focusrite USB ASIO", "name": "Focusrite USB ASIO"}]
+        strip = SimpleNamespace(strip_id=1, title="Mic 2", client=self.client,
+                                get_devices_func=lambda: self.devices,
+                                log_callback=self.logs.append,
+                                set_device_connected=lambda value: self.logs.append(value))
+        VirtualInputStrip._on_device_selected(strip, "[APP] Discord.exe")
+        self.assertEqual(self.client.inputs[-1], (1, "app:Discord.exe"))
+
+        bus = self.bus(0, virtual=False)
+        self.devices["renders"] = [{"id": "dev-1", "name": "Speakers"}]
+        bus.dev_btn.selected_device_id = "exclusive:dev-1"
+        bus._on_device_selected("[EX] Speakers")
+        self.assertEqual(self.client.outputs[-1], (0, "exclusive:id:dev-1"))
+
+        bus.dev_btn.selected_device_id = "asio:Focusrite USB ASIO"
+        bus._on_device_selected("[ASIO] Focusrite USB ASIO")
+        self.assertEqual(self.client.outputs[-1], (0, "asio:Focusrite USB ASIO"))
+
+    def test_bus_delay_and_lufs_ui(self):
+        bus = self.bus(0, virtual=False)
+        bus.delay_btn.set_delay_ms(45.0, emit=True)
+        self.assertIn("bus_delay 0 45.0", self.client.commands)
+        bus.set_lufs(-14.2)
+        self.assertEqual(bus.lufs_lbl.text(), "-14.2 LUFS")
+        bus.set_lufs(-70.0)
+        self.assertEqual(bus.lufs_lbl.text(), "-inf LUFS")
 
 
 if __name__ == "__main__":

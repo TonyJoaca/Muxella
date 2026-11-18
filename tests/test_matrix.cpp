@@ -119,10 +119,47 @@ void test_starve_fade_continuity() {
     std::cout << "PASSED\n";
 }
 
+void test_cross_strip_duck_and_bus_delay() {
+    std::cout << "[Test] Matrix: Cross-strip sidechain ducking and bus delay dispatch... ";
+    constexpr size_t FRAMES = 480;
+    metvoice::matrix::MixerEngine engine(2, 1, FRAMES, 48000.0f);
+    engine.routing().set_route(1, 0, true, 0.0f);
+    engine.input_connection_state(0)->store(true);
+    engine.input_connection_state(1)->store(true);
+
+    metvoice::matrix::MixerEngine::DspUpdate duck_upd{};
+    duck_upd.kind = metvoice::matrix::MixerEngine::DspKind::Duck;
+    duck_upd.index = 1;
+    duck_upd.values[0] = 0.0f; // Trigger from strip 0
+    duck_upd.values[1] = 8.0f; // Strong ducking
+    assert(engine.enqueue_dsp(duck_upd));
+
+    metvoice::matrix::MixerEngine::DspUpdate dly_upd{};
+    dly_upd.kind = metvoice::matrix::MixerEngine::DspKind::BusDelay;
+    dly_upd.index = 0;
+    dly_upd.values[0] = 10.0f;
+    assert(engine.enqueue_dsp(dly_upd));
+
+    // Prime both strips past target cushion
+    std::vector<float> key_audio(8192, 0.6f);
+    std::vector<float> music_audio(8192, 0.8f);
+    engine.strip_input_ring_buffer(0)->write(key_audio.data(), key_audio.size());
+    engine.strip_input_ring_buffer(1)->write(music_audio.data(), music_audio.size());
+
+    for (int block = 0; block < 4; ++block) {
+        engine.process_block(FRAMES);
+    }
+    assert(engine.strip(1).is_duck_enabled());
+    assert(engine.strip(1).duck_reduction_db() < -6.0f);
+    assert(std::abs(engine.bus(0).delay_ms() - 10.0f) < 0.1f);
+    std::cout << "PASSED\n";
+}
+
 int main() {
     test_matrix_summing_and_routing();
     test_solo_and_mute_arbitration();
     test_starve_fade_continuity();
+    test_cross_strip_duck_and_bus_delay();
     std::cout << "All Matrix Routing tests passed successfully!\n";
     return 0;
 }

@@ -127,7 +127,7 @@ This guarantees that summed signals across multiple strips never clip into digit
 
 ## 5. Control & Inter-Process Communication (IPC)
 
-Control of MetVoice is completely decoupled from the audio engine thread. External graphical user interfaces (Qt, Slint, Dear ImGui, Electron) and command-line tools interface through a Windows Named Pipe (`\\.\pipe\MetVoice_Control`):
+Control of MetVoice is completely decoupled from the audio engine thread. External graphical user interfaces (Qt, Slint, Dear ImGui, Electron) and command-line tools interface through a Windows Named Pipe (`\\.\pipe\Muxella_Control`):
 
 - **Status & Telemetry:**
   `meters` -> Returns JSON containing Peak L/R, RMS L/R, Gain Reduction, and Limiter clip counts.

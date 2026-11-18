@@ -25,11 +25,12 @@ add_subdirectory(noise-suppression-for-voice/external/rnnoise)
 add_library(metvoice_core STATIC
     src/core/drift_corrector.cpp
     src/core/wasapi_backend.cpp
+    src/core/asio_backend.cpp
     src/core/endpoint_manager.cpp
     src/core/app_sessions.cpp
     src/core/wav_recorder.cpp
 )
-target_link_libraries(metvoice_core PUBLIC ole32 avrt ksuser uuid winmm)
+target_link_libraries(metvoice_core PUBLIC ole32 avrt ksuser uuid winmm mmdevapi)
 
 
 # 2. DSP Library
@@ -73,7 +74,7 @@ if (MSVC)
 endif()
 
 # 6. Control CLI Tool
-add_executable(metvoice_ctl cli/metvoice_ctl.cpp)
+add_executable(muxella_ctl cli/metvoice_ctl.cpp)
 
 # 7. Unit Tests & Benchmarks
 enable_testing()

@@ -1,14 +1,241 @@
 #include "metvoice/core/wasapi_backend.hpp"
 #include "metvoice/core/mmcss.hpp"
 #include <functiondiscoverykeys_devpkey.h>
+#include <initguid.h>
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace metvoice::core {
 
 namespace {
+#ifndef AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
+    constexpr wchar_t kVirtualProcessLoopbackDevice[] = L"VAD\\Process_Loopback";
+    enum LocalAudioClientActivationType {
+        kActivationTypeDefault = 0,
+        kActivationTypeProcessLoopback = 1
+    };
+    enum LocalProcessLoopbackMode {
+        kLoopbackIncludeTree = 0,
+        kLoopbackExcludeTree = 1
+    };
+    struct LocalProcessLoopbackParams {
+        DWORD TargetProcessId;
+        LocalProcessLoopbackMode ProcessLoopbackMode;
+    };
+    struct LocalAudioClientActivationParams {
+        LocalAudioClientActivationType ActivationType;
+        union {
+            LocalProcessLoopbackParams ProcessLoopbackParams;
+        };
+    };
+#else
+    constexpr wchar_t kVirtualProcessLoopbackDevice[] = VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK;
+    using LocalProcessLoopbackParams = AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS;
+    using LocalAudioClientActivationParams = AUDIOCLIENT_ACTIVATION_PARAMS;
+    constexpr auto kActivationTypeProcessLoopback = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+    constexpr auto kLoopbackIncludeTree = PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+    constexpr auto kLoopbackExcludeTree = PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE;
+#endif
+
+    // {94EA2B94-E9CC-49E0-C0FF-EE64CA8F5B90}
+    constexpr GUID kIidIAgileObject = {0x94ea2b94, 0xe9cc, 0x49e0, {0xc0, 0xff, 0xee, 0x64, 0xca, 0x8f, 0x5b, 0x90}};
+
+    class ProcessLoopbackCompletionHandler final : public IActivateAudioInterfaceCompletionHandler {
+    public:
+        ProcessLoopbackCompletionHandler() : event_(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {}
+        ~ProcessLoopbackCompletionHandler() {
+            if (op_) op_->Release();
+            if (event_) CloseHandle(event_);
+        }
+
+        HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+            if (!ppv) return E_POINTER;
+            if (riid == __uuidof(IUnknown) || riid == __uuidof(IActivateAudioInterfaceCompletionHandler) ||
+                riid == kIidIAgileObject) {
+                *ppv = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+                AddRef();
+                return S_OK;
+            }
+            *ppv = nullptr;
+            return E_NOINTERFACE;
+        }
+        ULONG STDMETHODCALLTYPE AddRef() override { return ref_count_.fetch_add(1, std::memory_order_relaxed) + 1; }
+        ULONG STDMETHODCALLTYPE Release() override {
+            const ULONG next = ref_count_.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (next == 0) delete this;
+            return next;
+        }
+        HRESULT STDMETHODCALLTYPE ActivateCompleted(IActivateAudioInterfaceAsyncOperation* operation) override {
+            if (operation) {
+                op_ = operation;
+                op_->AddRef();
+            }
+            if (event_) SetEvent(event_);
+            return S_OK;
+        }
+
+        bool wait_for_client(DWORD timeout_ms, IAudioClient*& out_client) {
+            out_client = nullptr;
+            if (!event_ || WaitForSingleObject(event_, timeout_ms) != WAIT_OBJECT_0 || !op_) return false;
+            HRESULT activate_hr = E_FAIL;
+            IUnknown* unk = nullptr;
+            if (FAILED(op_->GetActivateResult(&activate_hr, &unk)) || FAILED(activate_hr) || !unk) {
+                if (unk) unk->Release();
+                return false;
+            }
+            const HRESULT qi = unk->QueryInterface(__uuidof(IAudioClient), reinterpret_cast<void**>(&out_client));
+            unk->Release();
+            return SUCCEEDED(qi) && out_client != nullptr;
+        }
+
+    private:
+        std::atomic<ULONG> ref_count_{1};
+        HANDLE event_{nullptr};
+        IActivateAudioInterfaceAsyncOperation* op_{nullptr};
+    };
+
+    WAVEFORMATEX* allocate_stereo_float_format(uint32_t sample_rate) {
+        auto* wfex = static_cast<WAVEFORMATEXTENSIBLE*>(CoTaskMemAlloc(sizeof(WAVEFORMATEXTENSIBLE)));
+        if (!wfex) return nullptr;
+        std::memset(wfex, 0, sizeof(WAVEFORMATEXTENSIBLE));
+        wfex->Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        wfex->Format.nChannels = 2;
+        wfex->Format.nSamplesPerSec = sample_rate;
+        wfex->Format.wBitsPerSample = 32;
+        wfex->Format.nBlockAlign = 8;
+        wfex->Format.nAvgBytesPerSec = sample_rate * 8;
+        wfex->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        wfex->Samples.wValidBitsPerSample = 32;
+        wfex->dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
+        wfex->SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+        return reinterpret_cast<WAVEFORMATEX*>(wfex);
+    }
+
+    WAVEFORMATEX* allocate_pcm_format(uint32_t sample_rate, uint16_t bits_per_sample, uint16_t container_bits) {
+        auto* wfex = static_cast<WAVEFORMATEXTENSIBLE*>(CoTaskMemAlloc(sizeof(WAVEFORMATEXTENSIBLE)));
+        if (!wfex) return nullptr;
+        std::memset(wfex, 0, sizeof(WAVEFORMATEXTENSIBLE));
+        wfex->Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+        wfex->Format.nChannels = 2;
+        wfex->Format.nSamplesPerSec = sample_rate;
+        wfex->Format.wBitsPerSample = container_bits;
+        wfex->Format.nBlockAlign = static_cast<WORD>(2 * (container_bits / 8));
+        wfex->Format.nAvgBytesPerSec = sample_rate * wfex->Format.nBlockAlign;
+        wfex->Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+        wfex->Samples.wValidBitsPerSample = bits_per_sample;
+        wfex->dwChannelMask = SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT;
+        wfex->SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+        return reinterpret_cast<WAVEFORMATEX*>(wfex);
+    }
+
+    bool activate_process_loopback_client(uint32_t pid, bool include_tree, uint32_t sample_rate,
+                                          IAudioClient*& out_client, WAVEFORMATEX*& out_wfx) {
+        out_client = nullptr;
+        out_wfx = nullptr;
+        if (pid == 0) return false;
+
+        LocalAudioClientActivationParams params{};
+        params.ActivationType = kActivationTypeProcessLoopback;
+        params.ProcessLoopbackParams.TargetProcessId = pid;
+        params.ProcessLoopbackParams.ProcessLoopbackMode =
+            include_tree ? kLoopbackIncludeTree : kLoopbackExcludeTree;
+
+        PROPVARIANT activate_params{};
+        activate_params.vt = VT_BLOB;
+        activate_params.blob.cbSize = sizeof(params);
+        activate_params.blob.pBlobData = reinterpret_cast<BYTE*>(&params);
+
+        auto* handler = new ProcessLoopbackCompletionHandler();
+        IActivateAudioInterfaceAsyncOperation* async_op = nullptr;
+        HRESULT hr = ActivateAudioInterfaceAsync(
+            kVirtualProcessLoopbackDevice,
+            __uuidof(IAudioClient),
+            &activate_params,
+            handler,
+            &async_op);
+        bool ok = false;
+        if (SUCCEEDED(hr)) {
+            ok = handler->wait_for_client(3000, out_client);
+        }
+        if (async_op) async_op->Release();
+        handler->Release();
+
+        if (!ok || !out_client) {
+            std::cerr << "[ProcessLoopback] ActivateAudioInterfaceAsync failed for PID " << pid
+                      << " (hr=0x" << std::hex << hr << std::dec << ")\n";
+            return false;
+        }
+        out_wfx = allocate_stereo_float_format(sample_rate);
+        if (!out_wfx) {
+            out_client->Release();
+            out_client = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    bool initialize_exclusive_render(IMMDevice* device, uint32_t req_rate, uint32_t req_frames,
+                                     IAudioClient*& client, WAVEFORMATEX*& out_wfx) {
+        if (!device || !client) return false;
+        std::vector<WAVEFORMATEX*> candidates;
+        candidates.push_back(allocate_stereo_float_format(req_rate));
+        candidates.push_back(allocate_pcm_format(req_rate, 24, 32));
+        candidates.push_back(allocate_pcm_format(req_rate, 24, 24));
+        candidates.push_back(allocate_pcm_format(req_rate, 16, 16));
+        if (req_rate != 48000) {
+            candidates.push_back(allocate_pcm_format(48000, 24, 32));
+            candidates.push_back(allocate_pcm_format(48000, 16, 16));
+        }
+        auto free_candidates = [&](WAVEFORMATEX* keep) {
+            for (WAVEFORMATEX* c : candidates) {
+                if (c && c != keep) CoTaskMemFree(c);
+            }
+        };
+
+        WAVEFORMATEX* chosen = nullptr;
+        for (WAVEFORMATEX* cand : candidates) {
+            if (!cand) continue;
+            if (client->IsFormatSupported(AUDCLNT_SHAREMODE_EXCLUSIVE, cand, nullptr) == S_OK) {
+                chosen = cand;
+                break;
+            }
+        }
+        if (!chosen) {
+            free_candidates(nullptr);
+            return false;
+        }
+
+        REFERENCE_TIME hns_period = static_cast<REFERENCE_TIME>(req_frames) * 10000000LL / chosen->nSamplesPerSec;
+        if (hns_period < 10000) hns_period = 10000;
+        HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                        hns_period, hns_period, chosen, nullptr);
+        if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) {
+            UINT32 aligned_frames = 0;
+            if (SUCCEEDED(client->GetBufferSize(&aligned_frames)) && aligned_frames > 0) {
+                hns_period = static_cast<REFERENCE_TIME>(10000000.0 * aligned_frames / chosen->nSamplesPerSec + 0.5);
+                client->Release();
+                client = nullptr;
+                if (SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                               reinterpret_cast<void**>(&client))) && client) {
+                    hr = client->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                            hns_period, hns_period, chosen, nullptr);
+                } else {
+                    hr = E_FAIL;
+                }
+            }
+        }
+        if (FAILED(hr)) {
+            free_candidates(nullptr);
+            return false;
+        }
+        free_candidates(chosen);
+        out_wfx = chosen;
+        return true;
+    }
+
     bool is_virtual_cable(const DeviceInfo& info) {
         return info.friendly_name.find(L"Muxella") != std::wstring::npos;
     }
@@ -131,10 +358,15 @@ WasapiEndpoint::~WasapiEndpoint() {
 bool WasapiEndpoint::start() {
     if (running_.load()) return true;
     // An explicitly selected endpoint must never become the system default.
-    if (info_.id.empty()) return false;
+    if (info_.type == DeviceType::ProcessLoopback) {
+        if (info_.target_pid == 0) return false;
+    } else if (info_.id.empty()) {
+        return false;
+    }
 
     stop_signal_.store(false);
-    if (info_.type == DeviceType::Capture || info_.type == DeviceType::LoopbackRender) {
+    if (info_.type == DeviceType::Capture || info_.type == DeviceType::LoopbackRender ||
+        info_.type == DeviceType::ProcessLoopback) {
         worker_thread_ = std::thread(&WasapiEndpoint::capture_thread_proc, this);
     } else {
         worker_thread_ = std::thread(&WasapiEndpoint::render_thread_proc, this);
@@ -165,60 +397,69 @@ void WasapiEndpoint::capture_thread_proc() {
 
     ScopedMmcss mmcss(L"Pro Audio");
 
-    IMMDeviceEnumerator* enumerator = nullptr;
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                          __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
-    if (FAILED(hr)) {
-        std::cerr << "[Capture Error] CoCreateInstance failed: hr=0x" << std::hex << hr << std::dec << "\n";
-        if (co_init) CoUninitialize();
-        return;
-    }
-
-    if (info_.id.empty()) {
-        EDataFlow flow = (info_.type == DeviceType::LoopbackRender) ? eRender : eCapture;
-        hr = enumerator->GetDefaultAudioEndpoint(flow, eConsole, &device_);
-        if (FAILED(hr)) {
-            std::cerr << "[Capture Error] GetDefaultAudioEndpoint failed: hr=0x" << std::hex << hr << std::dec << "\n";
+    if (info_.type == DeviceType::ProcessLoopback) {
+        if (!activate_process_loopback_client(info_.target_pid, info_.include_process_tree,
+                                              config_.sample_rate, audio_client_, wave_format_)) {
+            if (co_init) CoUninitialize();
+            return;
         }
+        raw_status_.store(0);
     } else {
-        hr = enumerator->GetDevice(info_.id.c_str(), &device_);
+        IMMDeviceEnumerator* enumerator = nullptr;
+        hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                              __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
         if (FAILED(hr)) {
-            std::cerr << "[Capture Error] GetDevice failed for ID: hr=0x" << std::hex << hr << std::dec << "\n";
+            std::cerr << "[Capture Error] CoCreateInstance failed: hr=0x" << std::hex << hr << std::dec << "\n";
+            if (co_init) CoUninitialize();
+            return;
         }
-    }
-    enumerator->Release();
 
-    if (!device_) {
-        std::cerr << "[Capture Error] device_ is null\n";
-        if (co_init) CoUninitialize();
-        return;
-    }
+        if (info_.id.empty()) {
+            EDataFlow flow = (info_.type == DeviceType::LoopbackRender) ? eRender : eCapture;
+            hr = enumerator->GetDefaultAudioEndpoint(flow, eConsole, &device_);
+            if (FAILED(hr)) {
+                std::cerr << "[Capture Error] GetDefaultAudioEndpoint failed: hr=0x" << std::hex << hr << std::dec << "\n";
+            }
+        } else {
+            hr = enumerator->GetDevice(info_.id.c_str(), &device_);
+            if (FAILED(hr)) {
+                std::cerr << "[Capture Error] GetDevice failed for ID: hr=0x" << std::hex << hr << std::dec << "\n";
+            }
+        }
+        enumerator->Release();
 
-    hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                           reinterpret_cast<void**>(&audio_client_));
-    if (FAILED(hr) || !audio_client_) {
-        std::cerr << "[Capture Error] Activate IAudioClient failed: hr=0x" << std::hex << hr << std::dec << "\n";
-        device_->Release();
-        device_ = nullptr;
-        if (co_init) CoUninitialize();
-        return;
-    }
+        if (!device_) {
+            std::cerr << "[Capture Error] device_ is null\n";
+            if (co_init) CoUninitialize();
+            return;
+        }
 
-    raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
-    hr = audio_client_->GetMixFormat(&wave_format_);
-    if (FAILED(hr) || !wave_format_) {
-        std::cerr << "[Capture Error] GetMixFormat failed: hr=0x" << std::hex << hr << std::dec << "\n";
-        audio_client_->Release();
-        audio_client_ = nullptr;
-        device_->Release();
-        device_ = nullptr;
-        if (co_init) CoUninitialize();
-        return;
+        hr = device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                               reinterpret_cast<void**>(&audio_client_));
+        if (FAILED(hr) || !audio_client_) {
+            std::cerr << "[Capture Error] Activate IAudioClient failed: hr=0x" << std::hex << hr << std::dec << "\n";
+            device_->Release();
+            device_ = nullptr;
+            if (co_init) CoUninitialize();
+            return;
+        }
+
+        raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
+        hr = audio_client_->GetMixFormat(&wave_format_);
+        if (FAILED(hr) || !wave_format_) {
+            std::cerr << "[Capture Error] GetMixFormat failed: hr=0x" << std::hex << hr << std::dec << "\n";
+            audio_client_->Release();
+            audio_client_ = nullptr;
+            device_->Release();
+            device_ = nullptr;
+            if (co_init) CoUninitialize();
+            return;
+        }
     }
 
     REFERENCE_TIME req_duration = static_cast<REFERENCE_TIME>(config_.buffer_frames) * 10000000 / wave_format_->nSamplesPerSec;
     DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-    if (info_.type == DeviceType::LoopbackRender) {
+    if (info_.type == DeviceType::LoopbackRender || info_.type == DeviceType::ProcessLoopback) {
         stream_flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
 
@@ -373,7 +614,8 @@ void WasapiEndpoint::capture_thread_proc() {
                         ring_buffer_->write(input_stereo.data(), input_stereo.size());
                     }
                 } else {
-                    // Resample to 48000 Hz using linear interpolation
+                    // Resample to target sample rate using linear interpolation
+                    stereo_conv_buf.clear();
                     size_t in_f = 0;
                     while (in_f < frames_available) {
                         size_t idx0 = in_f;
@@ -451,36 +693,57 @@ void WasapiEndpoint::render_thread_proc() {
         return;
     }
 
-    raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
-    hr = audio_client_->GetMixFormat(&wave_format_);
-    if (FAILED(hr) || !wave_format_) {
-        audio_client_->Release();
-        audio_client_ = nullptr;
-        device_->Release();
-        device_ = nullptr;
-        if (co_init) CoUninitialize();
-        return;
+    bool exclusive_mode = false;
+    if (config_.share_mode == ShareMode::Exclusive) {
+        exclusive_mode = initialize_exclusive_render(device_, config_.sample_rate, config_.buffer_frames,
+                                                     audio_client_, wave_format_);
+        if (!exclusive_mode && !audio_client_) {
+            device_->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                              reinterpret_cast<void**>(&audio_client_));
+        }
     }
+    exclusive_active_.store(exclusive_mode, std::memory_order_relaxed);
 
-    REFERENCE_TIME req_duration = static_cast<REFERENCE_TIME>(config_.buffer_frames) * 10000000 / wave_format_->nSamplesPerSec;
-    hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                   req_duration, 0, wave_format_, nullptr);
-    if (FAILED(hr)) {
-        // Fallback to 0 (default device buffer duration) for virtual/third-party drivers
+    if (!exclusive_mode) {
+        if (!audio_client_) {
+            device_->Release();
+            device_ = nullptr;
+            if (co_init) CoUninitialize();
+            return;
+        }
+        raw_status_.store(configure_cable_raw_stream(audio_client_, info_));
+        hr = audio_client_->GetMixFormat(&wave_format_);
+        if (FAILED(hr) || !wave_format_) {
+            audio_client_->Release();
+            audio_client_ = nullptr;
+            device_->Release();
+            device_ = nullptr;
+            if (co_init) CoUninitialize();
+            return;
+        }
+
+        REFERENCE_TIME req_duration = static_cast<REFERENCE_TIME>(config_.buffer_frames) * 10000000 / wave_format_->nSamplesPerSec;
         hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-                                       0, 0, wave_format_, nullptr);
-    }
+                                       req_duration, 0, wave_format_, nullptr);
+        if (FAILED(hr)) {
+            // Fallback to 0 (default device buffer duration) for virtual/third-party drivers
+            hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                                           0, 0, wave_format_, nullptr);
+        }
 
-    if (FAILED(hr)) {
-        std::cerr << "[WasapiEndpoint Render] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
-        CoTaskMemFree(wave_format_);
-        wave_format_ = nullptr;
-        audio_client_->Release();
-        audio_client_ = nullptr;
-        device_->Release();
-        device_ = nullptr;
-        if (co_init) CoUninitialize();
-        return;
+        if (FAILED(hr)) {
+            std::cerr << "[WasapiEndpoint Render] Initialize failed: hr=0x" << std::hex << hr << std::dec << "\n";
+            CoTaskMemFree(wave_format_);
+            wave_format_ = nullptr;
+            audio_client_->Release();
+            audio_client_ = nullptr;
+            device_->Release();
+            device_ = nullptr;
+            if (co_init) CoUninitialize();
+            return;
+        }
+    } else {
+        raw_status_.store(0);
     }
 
     audio_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -561,13 +824,16 @@ void WasapiEndpoint::render_thread_proc() {
         if (stop_signal_.load(std::memory_order_relaxed)) break;
         if (wait_res != WAIT_OBJECT_0) continue;
 
-        UINT32 padding = 0;
-        hr = audio_client_->GetCurrentPadding(&padding);
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING) break;
-        if (FAILED(hr)) continue;
+        UINT32 frames_needed = buffer_frame_count_;
+        if (!exclusive_mode) {
+            UINT32 padding = 0;
+            hr = audio_client_->GetCurrentPadding(&padding);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING) break;
+            if (FAILED(hr)) continue;
 
-        UINT32 frames_needed = buffer_frame_count_ - padding;
-        if (frames_needed == 0) continue;
+            frames_needed = buffer_frame_count_ - padding;
+            if (frames_needed == 0) continue;
+        }
 
         const size_t live_target = std::max<size_t>(frames_needed * 2, config_.buffer_frames * 2);
         const size_t healthy_cushion = live_target * 2;
@@ -593,6 +859,7 @@ void WasapiEndpoint::render_thread_proc() {
 
         BYTE* render_data = nullptr;
         hr = render_client_->GetBuffer(frames_needed, &render_data);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED || hr == AUDCLNT_E_SERVICE_NOT_RUNNING) break;
         if (SUCCEEDED(hr) && render_data) {
             const size_t stereo_samples_needed = frames_needed * 2;
 

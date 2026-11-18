@@ -6,7 +6,7 @@ import time
 import threading
 from typing import Optional, Dict, Any
 
-logger = logging.getLogger("metvoice.pipe")
+logger = logging.getLogger("muxella.pipe")
 
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
@@ -92,8 +92,8 @@ def _transfer(handle, buffer, size, write, deadline):
     finally:
         CloseHandle(operation.hEvent)
 
-class MetVoicePipeClient:
-    def __init__(self, pipe_name: str = r"\\.\pipe\MetVoice_Control"):
+class MuxellaPipeClient:
+    def __init__(self, pipe_name: str = r"\\.\pipe\Muxella_Control"):
         self.pipe_name = pipe_name
         self.connected = False
         self._lock = threading.Lock()
@@ -187,6 +187,12 @@ class MetVoicePipeClient:
     def set_reverb(self, strip_idx: int, amount: float):
         self.send_command(f"reverb {strip_idx} {amount:.1f}")
 
+    def set_duck(self, strip_idx: int, trigger_idx: int, amount: float):
+        self.send_command(f"duck {strip_idx} {int(trigger_idx)} {amount:.1f}")
+
+    def set_bus_delay(self, bus_idx: int, delay_ms: float):
+        self.send_command(f"bus_delay {bus_idx} {delay_ms:.1f}")
+
     def set_strip_mono(self, strip_idx: int, mono: bool):
         self.send_command(f"strip_mono {strip_idx} {1 if mono else 0}")
 
@@ -241,5 +247,9 @@ class MetVoicePipeClient:
             return json.loads(response).get("status") == "ok"
         except (ValueError, TypeError):
             return False
+
+
+# Backward compatibility alias
+MetVoicePipeClient = MuxellaPipeClient
 
 

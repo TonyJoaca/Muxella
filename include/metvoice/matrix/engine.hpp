@@ -23,7 +23,7 @@ namespace metvoice::matrix {
  */
 class MixerEngine {
 public:
-    enum class DspKind { StripEq, Compressor, Gate, Denoise, Reverb, BusEq };
+    enum class DspKind { StripEq, Compressor, Gate, Denoise, Reverb, Duck, BusEq, BusDelay };
     struct DspUpdate {
         DspKind kind{};
         size_t index{};
@@ -31,7 +31,8 @@ public:
     };
     // Single producer: the IPC worker. Only the audio thread applies DSP data.
     bool enqueue_dsp(const DspUpdate& update) noexcept {
-        if (update.index >= (update.kind == DspKind::BusEq ? num_buses_ : num_strips_)) return false;
+        const bool is_bus = (update.kind == DspKind::BusEq || update.kind == DspKind::BusDelay);
+        if (update.index >= (is_bus ? num_buses_ : num_strips_)) return false;
         return dsp_updates_.write(&update, 1) == 1;
     }
     MixerEngine(size_t num_strips, size_t num_buses, size_t max_block_frames = 1024,

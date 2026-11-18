@@ -1,5 +1,5 @@
 """
-Audio Engine Configuration Dialog for MetVoice:
+Audio Engine Configuration Dialog for Muxella:
 Allows configuring real-time Sample Rate (kHz) and Buffer Size (Frames)
 with dynamic latency readouts and instant engine restart.
 """

@@ -38,7 +38,7 @@ static std::string send_pipe_command(const std::wstring& pipe_name, const std::s
     HANDLE hPipe = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE,
                                0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (hPipe == INVALID_HANDLE_VALUE) {
-        return "Error: Could not connect to MetVoice IPC server.";
+        return "Error: Could not connect to Muxella IPC server.";
     }
 
     DWORD mode = PIPE_READMODE_MESSAGE;
@@ -66,21 +66,21 @@ int main(int argc, char* argv[]) {
     GetConsoleMode(hOut, &dwMode);
     SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 
-    const std::wstring pipe_name = L"\\\\.\\pipe\\MetVoice_Control";
+    const std::wstring pipe_name = L"\\\\.\\pipe\\Muxella_Control";
 
     if (argc < 2) {
         std::cout << "=========================================================\n"
-                  << "  MetVoice Control CLI - Open-Source Audio Matrix Router \n"
+                  << "  Muxella Control CLI - Low-Latency Audio Matrix Router  \n"
                   << "=========================================================\n"
                   << "Usage:\n"
-                  << "  metvoice_ctl monitor                 - Live VU-meter display\n"
-                  << "  metvoice_ctl gain <strip> <gain_db>  - Set channel strip gain (e.g. gain 0 -6.0)\n"
-                  << "  metvoice_ctl pan  <strip> <pan>      - Set pan (-1.0 left to +1.0 right)\n"
-                  << "  metvoice_ctl mute <strip> <0|1>      - Toggle mute on strip\n"
-                  << "  metvoice_ctl solo <strip> <0|1>      - Toggle solo on strip\n"
-                  << "  metvoice_ctl route <strip> <bus> <0|1> [gain_db] - Route strip to bus\n"
-                  << "  metvoice_ctl bus_gain <bus> <gain_db>- Set master bus output gain\n"
-                  << "  metvoice_ctl raw <command string>    - Send raw command\n";
+                  << "  muxella_ctl monitor                 - Live VU-meter display\n"
+                  << "  muxella_ctl gain <strip> <gain_db>  - Set channel strip gain (e.g. gain 0 -6.0)\n"
+                  << "  muxella_ctl pan  <strip> <pan>      - Set pan (-1.0 left to +1.0 right)\n"
+                  << "  muxella_ctl mute <strip> <0|1>      - Toggle mute on strip\n"
+                  << "  muxella_ctl solo <strip> <0|1>      - Toggle solo on strip\n"
+                  << "  muxella_ctl route <strip> <bus> <0|1> [gain_db] - Route strip to bus\n"
+                  << "  muxella_ctl bus_gain <bus> <gain_db>- Set master bus output gain\n"
+                  << "  muxella_ctl raw <command string>    - Send raw command\n";
         return 0;
     }
 
@@ -88,7 +88,7 @@ int main(int argc, char* argv[]) {
 
     if (subcmd == "monitor") {
         std::cout << "\033[2J\033[H"; // Clear screen
-        std::cout << "Streaming real-time audio metrics from MetVoice (Ctrl+C to quit)...\n\n";
+        std::cout << "Streaming real-time audio metrics from Muxella (Ctrl+C to quit)...\n\n";
 
         while (true) {
             std::string resp = send_pipe_command(pipe_name, "meters");
@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
 
             // Move cursor to top home
             std::cout << "\033[H";
-            std::cout << "=== MetVoice Real-Time Matrix Meters ===\n";
+            std::cout << "=== Muxella Real-Time Matrix Meters ===\n";
             std::cout << "IPC Response: " << resp.substr(0, 70) << "...\n\n";
 
             // Parse peak readings quickly from JSON for display

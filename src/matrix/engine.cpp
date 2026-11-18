@@ -87,6 +87,8 @@ void MixerEngine::process_block(size_t frames) noexcept {
         if (update.kind == DspKind::BusEq) {
             auto& b = bus(update.index);
             b.set_eq_low(v[0], v[3]); b.set_eq_mid(v[1], v[4], v[6]); b.set_eq_high(v[2], v[5]);
+        } else if (update.kind == DspKind::BusDelay) {
+            bus(update.index).set_delay_ms(v[0]);
         } else {
             auto& s = strip(update.index);
             switch (update.kind) {
@@ -97,6 +99,7 @@ void MixerEngine::process_block(size_t frames) noexcept {
                 case DspKind::Gate: s.set_gate(v[0]); break;
                 case DspKind::Denoise: s.set_denoise(v[0]); break;
                 case DspKind::Reverb: s.set_reverb(v[0]); break;
+                case DspKind::Duck: s.set_duck(static_cast<int>(std::lround(v[0])), v[1]); break;
                 default: break;
             }
         }
@@ -249,7 +252,25 @@ void MixerEngine::process_block(size_t frames) noexcept {
             strip_last_r_[i] = 0.0f;
         }
 
-        strips_[i]->process(buf, !any_solo || strips_[i]->is_solo());
+        strips_[i]->process(buf, !any_solo || strips_[i]->is_solo(), false);
+    }
+
+    // 1b. Cross-strip sidechain ducking, strip metering, and glitch detection
+    for (size_t i = 0; i < num_strips_; ++i) {
+        if (!strip_was_active_[i]) continue;
+        auto& buf = strip_buffers_[i];
+        const int trig = strips_[i]->duck_trigger();
+        if (trig >= 0 && static_cast<size_t>(trig) < num_strips_ &&
+            static_cast<size_t>(trig) != i && strip_was_active_[trig]) {
+            const auto& key_buf = strip_buffers_[static_cast<size_t>(trig)];
+            strips_[i]->apply_sidechain_duck(
+                key_buf.channel_data(0),
+                (key_buf.channels() > 1) ? key_buf.channel_data(1) : nullptr,
+                buf);
+        } else {
+            strips_[i]->apply_sidechain_duck(nullptr, nullptr, buf);
+        }
+        strips_[i]->update_meters(buf);
 
         if (strip_primed_[i]) {
             const float* ch0 = buf.channel_data(0);

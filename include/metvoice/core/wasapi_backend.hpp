@@ -28,6 +28,7 @@ public:
     void stop();
 
     [[nodiscard]] bool is_running() const noexcept { return running_.load(std::memory_order_relaxed); }
+    [[nodiscard]] bool is_exclusive() const noexcept { return exclusive_active_.load(std::memory_order_relaxed); }
     [[nodiscard]] int raw_status() const noexcept { return raw_status_.load(std::memory_order_relaxed); }
     [[nodiscard]] uint32_t device_sample_rate() const noexcept { return device_sample_rate_.load(std::memory_order_relaxed); }
     [[nodiscard]] uint16_t device_channels() const noexcept { return device_channels_.load(std::memory_order_relaxed); }
@@ -73,6 +74,7 @@ private:
     std::shared_ptr<SpscRingBuffer<float>> ring_buffer_;
 
     std::atomic<bool> running_{false};
+    std::atomic<bool> exclusive_active_{false};
     std::atomic<int> raw_status_{0}; // 0: not requested, 1: accepted, -1: unavailable
     std::atomic<uint32_t> device_sample_rate_{0};
     std::atomic<uint16_t> device_channels_{0};

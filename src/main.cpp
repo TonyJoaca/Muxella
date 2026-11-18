@@ -64,7 +64,7 @@ int main(int argc, char* argv[]) {
     if (block_size == 0) block_size = 480;
 
     std::cout << "=================================================================\n";
-    std::cout << "  MetVoice - Open-Source Low-Latency Windows Audio Matrix Engine \n";
+    std::cout << "  Muxella - Low-Latency Windows Audio Matrix Engine              \n";
     std::cout << "  Clean-Room High-Performance Audio Routing Workstation          \n";
     std::cout << "=================================================================\n\n";
 
@@ -156,7 +156,7 @@ int main(int argc, char* argv[]) {
     metvoice::core::EndpointManager ep_mgr(engine);
 
     // 5. Start Named Pipe IPC Server with EndpointManager
-    std::cout << "[IPC Server] Starting control interface on \\\\.\\pipe\\MetVoice_Control...\n";
+    std::cout << "[IPC Server] Starting control interface on \\\\.\\pipe\\Muxella_Control...\n";
     metvoice::ipc::NamedPipeServer pipe_server(engine, &ep_mgr);
     pipe_server.set_shutdown_handler([&]() { g_shutdown.store(true); });
     pipe_server.start();
@@ -234,7 +234,7 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    std::cout << "Engine successfully running. Press Enter to shutdown or use metvoice_ctl...\n";
+    std::cout << "Engine successfully running. Press Enter to shutdown or use muxella_ctl...\n";
     
     // Non-blocking wait for shutdown signal or Enter key
     while (!g_shutdown.load()) {
@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "\n[Shutdown] Stopping MetVoice engine cleanly...\n";
+    std::cout << "\n[Shutdown] Stopping Muxella engine cleanly...\n";
     g_shutdown.store(true);
 
     pipe_server.stop();

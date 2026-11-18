@@ -13,7 +13,7 @@ class NamedPipeServer {
 public:
     NamedPipeServer(matrix::MixerEngine& engine,
                     core::EndpointManager* ep_mgr = nullptr,
-                    const std::wstring& pipe_name = L"\\\\.\\pipe\\MetVoice_Control");
+                    const std::wstring& pipe_name = L"\\\\.\\pipe\\Muxella_Control");
     ~NamedPipeServer();
 
     bool start();

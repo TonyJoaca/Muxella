@@ -9,7 +9,8 @@ namespace metvoice::core {
 enum class DeviceType {
     Capture,
     Render,
-    LoopbackRender // Captures output of a render device via WASAPI Loopback
+    LoopbackRender, // Captures output of a render device via WASAPI Loopback
+    ProcessLoopback // Captures output of a target process tree via Windows 10/11 Process Loopback
 };
 
 enum class ShareMode {
@@ -24,6 +25,8 @@ struct DeviceInfo {
     uint32_t default_sample_rate{48000};
     uint32_t channels{2};
     bool is_default{false};
+    uint32_t target_pid{0};
+    bool include_process_tree{true};
 };
 
 struct AudioStreamConfig {

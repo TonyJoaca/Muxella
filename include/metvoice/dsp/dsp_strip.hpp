@@ -6,6 +6,7 @@
 #include "metvoice/dsp/gate.hpp"
 #include "metvoice/dsp/denoise.hpp"
 #include "metvoice/dsp/reverb.hpp"
+#include "metvoice/dsp/ducker.hpp"
 #include "metvoice/dsp/meter.hpp"
 #include "metvoice/dsp/ramp.hpp"
 #include <numbers>
@@ -56,7 +57,7 @@ public:
     void reset_processing() noexcept {
         eq_low_l_.reset(); eq_low_r_.reset(); eq_mid_l_.reset(); eq_mid_r_.reset();
         eq_high_l_.reset(); eq_high_r_.reset(); compressor_.reset(); gate_.reset();
-        denoiser_.reset(); reverb_.reset(); meter_left_.reset(); meter_right_.reset();
+        denoiser_.reset(); reverb_.reset(); ducker_.reset(); meter_left_.reset(); meter_right_.reset();
         gain_ramp_ = GainRamp(gain_linear_.load(std::memory_order_relaxed));
         pan_l_ramp_ = GainRamp(pan_left_.load(std::memory_order_relaxed));
         pan_r_ramp_ = GainRamp(pan_right_.load(std::memory_order_relaxed));
@@ -123,6 +124,28 @@ public:
     void set_reverb(float amount) noexcept { reverb_.set_amount(amount); }
     [[nodiscard]] float reverb_amount() const noexcept { return reverb_.is_enabled() ? 1.0f : 0.0f; }
 
+    void set_duck(int trigger_strip, float amount) noexcept { ducker_.configure(trigger_strip, amount); }
+    [[nodiscard]] int duck_trigger() const noexcept { return ducker_.trigger_strip(); }
+    [[nodiscard]] float duck_amount() const noexcept { return ducker_.amount(); }
+    [[nodiscard]] bool is_duck_enabled() const noexcept { return ducker_.is_enabled(); }
+    [[nodiscard]] float duck_reduction_db() const noexcept { return ducker_.current_duck_db(); }
+
+    void apply_sidechain_duck(const float* key_l, const float* key_r, core::AudioBuffer& buffer) noexcept {
+        if (buffer.frames() == 0) return;
+        float* l = buffer.channel_data(0);
+        float* r = (buffer.channels() > 1) ? buffer.channel_data(1) : nullptr;
+        ducker_.process(key_l, key_r, l, r, buffer.frames());
+    }
+
+    void update_meters(const core::AudioBuffer& buffer) noexcept {
+        const size_t frames = buffer.frames();
+        if (frames == 0) return;
+        const float* l = buffer.channel_data(0);
+        const float* r = (buffer.channels() > 1) ? buffer.channel_data(1) : l;
+        meter_left_.process(l, frames);
+        meter_right_.process(r, frames);
+    }
+
     [[nodiscard]] float gain_reduction_db() const noexcept { return compressor_.current_gain_reduction_db(); }
 
     [[nodiscard]] float peak_left_db() const noexcept { return meter_left_.peak_db(); }
@@ -133,7 +156,7 @@ public:
     /**
      * @brief Process an in-place stereo or mono audio buffer.
      */
-    void process(core::AudioBuffer& buffer, bool audible = true) noexcept {
+    void process(core::AudioBuffer& buffer, bool audible = true, bool run_meters = true) noexcept {
         const size_t frames = buffer.frames();
         if (frames == 0) return;
 
@@ -200,11 +223,8 @@ public:
         }
 
         // 8. Metering Stage
-        meter_left_.process(l, frames);
-        if (buffer.channels() > 1) {
-            meter_right_.process(r, frames);
-        } else {
-            meter_right_.process(l, frames);
+        if (run_meters) {
+            update_meters(buffer);
         }
     }
 
@@ -219,6 +239,7 @@ private:
         set_gate(0.0f);
         set_denoise(0.0f);
         set_reverb(0.0f);
+        set_duck(-1, 0.0f);
     }
 
     GainRamp gain_ramp_, pan_l_ramp_, pan_r_ramp_, mute_ramp_;
@@ -247,6 +268,7 @@ private:
     NoiseGate gate_;
     Denoiser denoiser_;
     Reverb reverb_;
+    SidechainDucker ducker_;
 
     AudioMeter meter_left_;
     AudioMeter meter_right_;

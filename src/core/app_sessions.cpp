@@ -1,5 +1,6 @@
 #include "metvoice/core/app_sessions.hpp"
 #include <windows.h>
+#include <tlhelp32.h>
 #include <mmdeviceapi.h>
 #include <audiopolicy.h>
 #include <audioclient.h>
@@ -112,5 +113,61 @@ std::string set_app_session(const std::string& id, float level, bool muted) {
     });
     return Json{{"status", ok ? "ok" : "error"},
         {"message", ok ? "Updated" : found ? "Windows rejected the change" : "App session ended; refresh the list"}}.dump();
+}
+
+std::vector<AudioProcessEntry> enumerate_audio_processes() {
+    std::vector<AudioProcessEntry> entries;
+    std::vector<std::string> seen;
+    auto lowercase = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    };
+    visit([&](const Json& session, ISimpleAudioVolume*) {
+        const uint32_t pid = session.value("pid", 0u);
+        const std::string name = session.value("name", std::string{});
+        if (pid == 0 || name.empty() || pid == GetCurrentProcessId()) return;
+        const std::string key = lowercase(name);
+        if (std::find(seen.begin(), seen.end(), key) == seen.end()) {
+            seen.push_back(key);
+            entries.push_back({pid, name});
+        }
+    });
+    std::sort(entries.begin(), entries.end(), [&](const AudioProcessEntry& a, const AudioProcessEntry& b) {
+        return lowercase(a.name) < lowercase(b.name);
+    });
+    return entries;
+}
+
+uint32_t find_process_pid_by_name(const std::string& exe_name) {
+    if (exe_name.empty()) return 0;
+    auto lowercase = [](std::string value) {
+        std::transform(value.begin(), value.end(), value.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    };
+    const std::string target = lowercase(exe_name);
+    for (const auto& entry : enumerate_audio_processes()) {
+        if (lowercase(entry.name) == target) {
+            return entry.pid;
+        }
+    }
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    uint32_t found = 0;
+    const DWORD self_pid = GetCurrentProcessId();
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (pe.th32ProcessID == 0 || pe.th32ProcessID == self_pid) continue;
+            if (lowercase(utf8(pe.szExeFile)) == target) {
+                found = pe.th32ProcessID;
+                break;
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
 }
 }

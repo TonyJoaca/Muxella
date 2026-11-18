@@ -2,7 +2,9 @@
 
 #include "metvoice/core/audio_buffer.hpp"
 #include "metvoice/dsp/biquad.hpp"
+#include "metvoice/dsp/delay_line.hpp"
 #include "metvoice/dsp/limiter.hpp"
+#include "metvoice/dsp/lufs_meter.hpp"
 #include "metvoice/dsp/meter.hpp"
 #include "metvoice/dsp/ramp.hpp"
 #include <atomic>
@@ -17,7 +19,9 @@ class MasterBus {
 public:
     explicit MasterBus(const std::string& name = "Bus", float sample_rate = 48000.0f)
         : name_(name), sample_rate_(sample_rate),
-          meter_left_(sample_rate), meter_right_(sample_rate) {
+          delay_line_(sample_rate),
+          meter_left_(sample_rate), meter_right_(sample_rate),
+          lufs_meter_(sample_rate) {
         set_gain_db(0.0f);
         set_eq_low(0.0f, 100.0f);
         set_eq_mid(0.0f, 1000.0f, 1.0f);
@@ -40,7 +44,8 @@ public:
     void reset_processing() noexcept {
         eq_low_l_.reset(); eq_low_r_.reset(); eq_mid_l_.reset(); eq_mid_r_.reset();
         eq_high_l_.reset(); eq_high_r_.reset(); limiter_.reset();
-        meter_left_.reset(); meter_right_.reset();
+        delay_line_.reset();
+        meter_left_.reset(); meter_right_.reset(); lufs_meter_.reset();
         gain_ramp_ = GainRamp(gain_linear_.load(std::memory_order_relaxed));
         mute_ramp_ = GainRamp(0.0f);
     }
@@ -51,6 +56,8 @@ public:
     void enable_eq(bool enable) noexcept { eq_enabled_.store(enable, std::memory_order_relaxed); }
     [[nodiscard]] bool is_eq_enabled() const noexcept { return eq_enabled_.load(std::memory_order_relaxed); }
     void enable_limiter(bool enable) noexcept { limiter_enabled_.store(enable, std::memory_order_relaxed); }
+    void set_delay_ms(float delay_ms) noexcept { delay_line_.set_delay_ms(delay_ms); }
+    [[nodiscard]] float delay_ms() const noexcept { return delay_line_.delay_ms(); }
 
     void set_eq_low(float gain_db, float freq_hz = 100.0f) {
         eq_low_gain_.store(gain_db, std::memory_order_relaxed);
@@ -86,6 +93,8 @@ public:
     [[nodiscard]] float peak_right_db() const noexcept { return meter_right_.peak_db(); }
     [[nodiscard]] float rms_left_db() const noexcept { return meter_left_.rms_db(); }
     [[nodiscard]] float rms_right_db() const noexcept { return meter_right_.rms_db(); }
+    [[nodiscard]] float lufs_momentary() const noexcept { return lufs_meter_.momentary_lufs(); }
+    [[nodiscard]] float lufs_short_term() const noexcept { return lufs_meter_.short_term_lufs(); }
     [[nodiscard]] uint64_t clip_events() const noexcept { return limiter_.clip_events(); }
 
     void process(core::AudioBuffer& buffer) noexcept {
@@ -137,13 +146,17 @@ public:
             if (buffer.channels() > 1) r[f] *= gain;
         }
 
-        // 5. Peak Metering
+        // 5. Lip-Sync Output Delay Line (0 .. 200 ms)
+        delay_line_.process(l, buffer.channels() > 1 ? r : nullptr, frames);
+
+        // 6. Peak & K-Weighted ITU-R BS.1770 LUFS Metering
         meter_left_.process(l, frames);
         if (buffer.channels() > 1) {
             meter_right_.process(r, frames);
         } else {
             meter_right_.process(l, frames);
         }
+        lufs_meter_.process(l, buffer.channels() > 1 ? r : l, frames);
     }
 
 private:
@@ -171,8 +184,10 @@ private:
     BiquadFilter eq_high_l_, eq_high_r_;
 
     SoftLimiter limiter_{-0.1f};
+    StereoDelayLine delay_line_;
     AudioMeter meter_left_;
     AudioMeter meter_right_;
+    LufsMeter lufs_meter_;
 };
 
 } // namespace metvoice::dsp

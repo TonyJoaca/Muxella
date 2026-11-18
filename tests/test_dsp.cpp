@@ -5,6 +5,9 @@
 #include "metvoice/dsp/gate.hpp"
 #include "metvoice/dsp/denoise.hpp"
 #include "metvoice/dsp/reverb.hpp"
+#include "metvoice/dsp/ducker.hpp"
+#include "metvoice/dsp/delay_line.hpp"
+#include "metvoice/dsp/lufs_meter.hpp"
 #include "metvoice/dsp/dsp_strip.hpp"
 #include <iostream>
 #include <vector>
@@ -146,12 +149,67 @@ void test_rnnoise_denoiser_reduction() {
     std::cout << "PASSED (Residual power: " << power_after << ")\n";
 }
 
+void test_sidechain_ducker() {
+    std::cout << "[Test] DSP: SidechainDucker key attenuation and release... ";
+    metvoice::dsp::SidechainDucker ducker(48000.0f);
+    ducker.configure(0, 8.0f);
+    assert(ducker.is_enabled());
+
+    std::vector<float> key(4800, 0.5f);
+    std::vector<float> dst_l(4800, 1.0f), dst_r(4800, 1.0f);
+    ducker.process(key.data(), key.data(), dst_l.data(), dst_r.data(), 4800);
+    assert(dst_l.back() < 0.35f);
+    assert(ducker.current_duck_db() < -8.0f);
+
+    // Silence on key must allow release back near unity
+    std::vector<float> silent(24000, 0.0f);
+    std::vector<float> rec_l(24000, 1.0f), rec_r(24000, 1.0f);
+    ducker.process(silent.data(), silent.data(), rec_l.data(), rec_r.data(), 24000);
+    assert(rec_l.back() > 0.85f);
+    std::cout << "PASSED (Attenuation: " << (20.0f * std::log10(dst_l.back())) << " dB)\n";
+}
+
+void test_stereo_delay_line() {
+    std::cout << "[Test] DSP: StereoDelayLine 20 ms offset... ";
+    metvoice::dsp::StereoDelayLine delay(48000.0f);
+    delay.set_delay_ms(20.0f); // 960 samples at 48 kHz
+    delay.reset();
+
+    std::vector<float> l(2400, 0.0f), r(2400, 0.0f);
+    l[0] = 1.0f;
+    r[0] = -1.0f;
+    delay.process(l.data(), r.data(), l.size());
+
+    assert(std::abs(l[0]) < 1e-5f);
+    assert(std::abs(l[960] - 1.0f) < 0.05f);
+    assert(std::abs(r[960] + 1.0f) < 0.05f);
+    std::cout << "PASSED\n";
+}
+
+void test_lufs_meter() {
+    std::cout << "[Test] DSP: LufsMeter ITU-R BS.1770 K-weighted measurement... ";
+    metvoice::dsp::LufsMeter lufs(48000.0f);
+    std::vector<float> l(24000, 0.0f), r(24000, 0.0f);
+    for (size_t i = 0; i < l.size(); ++i) {
+        const float s = 0.25f * std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * i / 48000.0f);
+        l[i] = s;
+        r[i] = s;
+    }
+    lufs.process(l.data(), r.data(), l.size());
+    const float m = lufs.momentary_lufs();
+    assert(m > -18.0f && m < -8.0f);
+    std::cout << "PASSED (Momentary: " << m << " LUFS)\n";
+}
+
 int main() {
     test_biquad_lowpass();
     test_compressor_dynamics();
     test_limiter_ceiling_guarantee();
     test_strip_fx_chain();
     test_rnnoise_denoiser_reduction();
+    test_sidechain_ducker();
+    test_stereo_delay_line();
+    test_lufs_meter();
     std::cout << "All DSP unit tests passed successfully!\n";
     return 0;
 }

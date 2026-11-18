@@ -22,13 +22,14 @@ std::string CommandDispatcher::serialize_meters_json(const matrix::MixerEngine& 
     for (size_t i = 0; i < engine.num_strips(); ++i) {
         const auto& s = engine.strip(i);
         result["strips"].push_back({{"id", i}, {"name", s.name()}, {"peak_l", s.peak_left_db()},
-            {"enabled", s.is_enabled()},
+            {"enabled", s.is_enabled()}, {"duck_db", s.duck_reduction_db()},
             {"peak_r", s.peak_right_db()}, {"gr", s.gain_reduction_db()}, {"mute", s.is_muted()}, {"solo", s.is_solo()}});
     }
     for (size_t i = 0; i < engine.num_buses(); ++i) {
         const auto& b = engine.bus(i);
         result["buses"].push_back({{"id", i}, {"name", b.name()}, {"peak_l", b.peak_left_db()},
-            {"enabled", b.is_enabled()},
+            {"enabled", b.is_enabled()}, {"lufs_m", b.lufs_momentary()}, {"lufs_s", b.lufs_short_term()},
+            {"delay_ms", b.delay_ms()},
             {"peak_r", b.peak_right_db()}, {"clips", b.clip_events()}, {"mute", b.is_muted()}});
     }
     return result.dump(-1, ' ', false, Json::error_handler_t::replace);
@@ -50,8 +51,9 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, core
         {"SET_GAIN", "gain"}, {"SET_PAN", "pan"}, {"SET_MUTE", "mute"}, {"SET_SOLO", "solo"},
         {"SET_ROUTE", "route"}, {"SET_BUS_GAIN", "bus_gain"}, {"SET_BUS_MUTE", "bus_mute"},
         {"SET_EQ", "eq"}, {"SET_COMP", "comp"}, {"SET_GATE", "gate"}, {"SET_DENOISE", "denoise"},
-        {"SET_REVERB", "reverb"}, {"SET_STRIP_MONO", "strip_mono"}, {"SET_BUS_MONO", "bus_mono"},
-        {"SET_BUS_EQ", "bus_eq"}, {"SET_BUS_EQ_PARAMS", "bus_set_eq"}, {"GET_BUS_EQ", "get_bus_eq"}};
+        {"SET_REVERB", "reverb"}, {"SET_DUCK", "duck"}, {"SET_STRIP_MONO", "strip_mono"}, {"SET_BUS_MONO", "bus_mono"},
+        {"SET_BUS_EQ", "bus_eq"}, {"SET_BUS_EQ_PARAMS", "bus_set_eq"}, {"GET_BUS_EQ", "get_bus_eq"},
+        {"SET_BUS_DELAY", "bus_delay"}};
     if (auto it = aliases.find(command); it != aliases.end()) command = it->second;
     if (command == "record_status") return engine.recorder().status_json() + "\n";
     if (command == "record_stop") {
@@ -162,6 +164,30 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, core
         for (float value : v) if (!std::isfinite(value)) return error("invalid EQ value");
         if (!engine.enqueue_dsp(update)) return error("DSP update queue full");
         result["eq"] = "updated";
+        return reply(result);
+    }
+    if (command == "duck") {
+        int trigger = -1;
+        float amount = 0.0f;
+        if (!(input >> trigger >> amount) || !std::isfinite(amount) ||
+            trigger < -1 || trigger >= static_cast<int>(engine.num_strips())) {
+            return error("invalid duck command");
+        }
+        update.kind = Kind::Duck;
+        update.values[0] = static_cast<float>(trigger);
+        update.values[1] = std::clamp(amount, 0.0f, 10.0f);
+        if (!engine.enqueue_dsp(update)) return error("DSP update queue full");
+        result["trigger"] = trigger;
+        result["amount"] = update.values[1];
+        return reply(result);
+    }
+    if (command == "bus_delay") {
+        float delay_ms = 0.0f;
+        if (!(input >> delay_ms) || !std::isfinite(delay_ms)) return error("invalid bus delay");
+        update.kind = Kind::BusDelay;
+        update.values[0] = std::clamp(delay_ms, 0.0f, dsp::StereoDelayLine::kMaxDelayMs);
+        if (!engine.enqueue_dsp(update)) return error("DSP update queue full");
+        result["delay_ms"] = update.values[0];
         return reply(result);
     }
     float value = 0;
