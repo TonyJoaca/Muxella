@@ -3,6 +3,7 @@
 #include <cstring>
 #include <mutex>
 #include <mmsystem.h>
+#include <timeapi.h>
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002

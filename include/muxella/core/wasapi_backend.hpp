@@ -3,6 +3,12 @@
 #include "muxella/core/audio_device.hpp"
 #include "muxella/core/ring_buffer.hpp"
 #include "muxella/core/debug_telemetry.hpp"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>

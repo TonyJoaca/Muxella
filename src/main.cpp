@@ -3,6 +3,9 @@
 #include "muxella/core/mmcss.hpp"
 #include "muxella/matrix/engine.hpp"
 #include "muxella/ipc/named_pipe_server.hpp"
+#include <windows.h>
+#include <timeapi.h>
+#include <mmsystem.h>
 #include <iostream>
 #include <iomanip>
 #include <chrono>

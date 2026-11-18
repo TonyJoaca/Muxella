@@ -24,7 +24,7 @@ void test_biquad_lowpass() {
     // Feed 100 Hz sine wave (passband)
     float passband_power = 0.0f;
     for (int i = 0; i < 4800; ++i) {
-        float in = std::sin(2.0f * std::numbers::pi * 100.0f * i / SAMPLE_RATE);
+        float in = std::sin(2.0f * std::numbers::pi_v<float> * 100.0f * i / SAMPLE_RATE);
         float out = lpf.process_sample(in);
         if (i > 2400) passband_power += out * out;
     }
@@ -34,7 +34,7 @@ void test_biquad_lowpass() {
     // Feed 10,000 Hz sine wave (stopband)
     float stopband_power = 0.0f;
     for (int i = 0; i < 4800; ++i) {
-        float in = std::sin(2.0f * std::numbers::pi * 10000.0f * i / SAMPLE_RATE);
+        float in = std::sin(2.0f * std::numbers::pi_v<float> * 10000.0f * i / SAMPLE_RATE);
         float out = lpf.process_sample(in);
         if (i > 2400) stopband_power += out * out;
     }
@@ -105,7 +105,7 @@ void test_strip_fx_chain() {
     for (size_t ch = 0; ch < 2; ++ch) {
         float* d = buf.channel_data(ch);
         for (size_t f = 0; f < 480; ++f) {
-            d[f] = 0.2f * std::sin(2.0f * std::numbers::pi * 440.0f * f / 48000.0f);
+            d[f] = 0.2f * std::sin(2.0f * std::numbers::pi_v<float> * 440.0f * f / 48000.0f);
         }
     }
 
@@ -114,6 +114,7 @@ void test_strip_fx_chain() {
     // Verify buffer was processed cleanly without NaNs or infinities
     for (size_t ch = 0; ch < 2; ++ch) {
         float* d = buf.channel_data(ch);
+        (void)d;
         for (size_t f = 0; f < 480; ++f) {
             assert(!std::isnan(d[f]));
             assert(!std::isinf(d[f]));

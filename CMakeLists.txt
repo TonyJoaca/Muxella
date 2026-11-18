@@ -5,9 +5,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Global compile definitions for Windows API cleanliness
+add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+
 # Enable aggressive optimization for real-time DSP
 if (MSVC)
-    add_compile_options(/O2 /fp:fast /W4)
+    add_compile_options(/O2 /fp:fast /W4 /wd4324 /wd4244 /wd4189)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-O3 -ffast-math -Wall -Wextra -Wpedantic)
     add_link_options(-static -static-libgcc -static-libstdc++)
@@ -56,7 +60,7 @@ target_link_libraries(muxella_ipc PUBLIC muxella_matrix)
 
 # 5. Main Audio Engine Executable
 add_executable(muxella_server src/main.cpp)
-target_link_libraries(muxella_server PRIVATE muxella_ipc muxella_matrix muxella_core muxella_dsp)
+target_link_libraries(muxella_server PRIVATE muxella_ipc muxella_matrix muxella_core muxella_dsp winmm)
 
 # 5b. Native C++ USB/IP Virtual Cable Library & Host
 add_library(muxella_usbip STATIC

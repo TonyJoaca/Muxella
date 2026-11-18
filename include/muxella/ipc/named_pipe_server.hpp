@@ -2,6 +2,12 @@
 
 #include "muxella/matrix/engine.hpp"
 #include "muxella/core/endpoint_manager.hpp"
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <thread>
 #include <atomic>
