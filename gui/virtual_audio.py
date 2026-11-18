@@ -1,4 +1,4 @@
-"""Own the cable host without running the mixer or its USB driver elevated."""
+﻿"""Own the cable host without running the mixer or its USB driver elevated."""
 import os
 import json
 import shutil
@@ -14,6 +14,7 @@ def device_matches(selected, present):
     aliases = {"muxella main", "muxella spotify", "muxella discord",
                "muxella out b1", "muxella out b2", "muxella out b3"}
     return selected in aliases and (present.startswith(selected + " (") or
+                                    present.startswith(selected + " link") or
                                     "(" + selected + ")" in present)
 
 
@@ -36,11 +37,11 @@ def resolve_selection(name, endpoint_id, preferred, secondary=(), extra=()):
 
 def migrate_device_name(name):
     aliases = {
-        "MetVoice Main VAIO": "Muxella Main",
-        "MetVoice Spotify VAIO": "Muxella Spotify",
-        "MetVoice Discord VAIO": "Muxella Discord",
-        "MetVoice Out B1": "Muxella Out B1",
-        "MetVoice Out B2": "Muxella Out B2",
+        "Muxella Main VAIO": "Muxella Main",
+        "Muxella Spotify VAIO": "Muxella Spotify",
+        "Muxella Discord VAIO": "Muxella Discord",
+        "Muxella Out B1": "Muxella Out B1",
+        "Muxella Out B2": "Muxella Out B2",
         "Voicemeeter Out B3": "Muxella Out B3",
     }
     for old, new in aliases.items():

@@ -1,12 +1,12 @@
-#include "metvoice/core/asio_backend.hpp"
-#include "metvoice/core/mmcss.hpp"
+﻿#include "muxella/core/asio_backend.hpp"
+#include "muxella/core/mmcss.hpp"
 #include <objbase.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
 
-namespace metvoice::core {
+namespace muxella::core {
 
 std::vector<AsioDriverInfo> AsioHostInterface::enumerate_drivers() {
     std::vector<AsioDriverInfo> drivers;
@@ -449,4 +449,4 @@ void AsioEndpoint::worker_proc() {
     if (co_init) CoUninitialize();
 }
 
-} // namespace metvoice::core
+} // namespace muxella::core

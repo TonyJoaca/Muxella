@@ -1,6 +1,6 @@
-#include "metvoice/dsp/limiter.hpp"
+﻿#include "muxella/dsp/limiter.hpp"
 
-namespace metvoice::dsp {
+namespace muxella::dsp {
 
 SoftLimiter::SoftLimiter(float ceiling_db, float knee_threshold)
     : knee_threshold_(knee_threshold) {
@@ -44,4 +44,4 @@ void SoftLimiter::process(float* const* channel_ptrs, size_t channels, size_t fr
     }
 }
 
-} // namespace metvoice::dsp
+} // namespace muxella::dsp

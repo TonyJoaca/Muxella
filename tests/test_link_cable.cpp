@@ -1,4 +1,4 @@
-#include "metvoice/core/wasapi_backend.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -6,7 +6,7 @@
 #include <cmath>
 #include <endpointvolume.h>
 
-static void print_endpoint_volume(const metvoice::core::DeviceInfo& info) {
+static void print_endpoint_volume(const muxella::core::DeviceInfo& info) {
     const HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IMMDeviceEnumerator* enumerator = nullptr;
     IMMDevice* device = nullptr;
@@ -34,7 +34,7 @@ int main(int argc, char* argv[]) {
         try { bus = std::stoi(argv[1]); } catch (...) { return 2; }
     }
     if (bus < 1 || bus > 3) return 2;
-    const auto capture_name = L"MetVoice Out B" + std::to_wstring(bus);
+    const auto capture_name = L"Muxella Out B" + std::to_wstring(bus);
     const auto original_capture_name = L"Voicemeeter Out B" + std::to_wstring(bus);
     const auto link_name = capture_name + L" Link";
     const auto original_link_name = L"Voicemeeter In " + std::to_wstring(bus);
@@ -43,8 +43,8 @@ int main(int argc, char* argv[]) {
         for (const char* ch = argv[2]; *ch; ++ch) render_override.push_back(static_cast<unsigned char>(*ch));
     }
     std::cout << "=== Testing playback link to B" << bus << " recording endpoint ===\n";
-    auto renders = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
-    auto captures = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Capture);
+    auto renders = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
+    auto captures = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Capture);
 
     int r_idx = -1;
     for (size_t i = 0; i < renders.size(); ++i) {
@@ -75,19 +75,19 @@ int main(int argc, char* argv[]) {
     std::wcout << L"Capture (Mic): " << captures[c_idx].friendly_name << L"\n";
     print_endpoint_volume(captures[c_idx]);
 
-    metvoice::core::AudioStreamConfig cfg{48000, 2, 480};
-    auto play_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-    auto cap_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
+    muxella::core::AudioStreamConfig cfg{48000, 2, 480};
+    auto play_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+    auto cap_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
 
-    metvoice::core::WasapiEndpoint player(renders[r_idx], cfg, play_ring);
-    metvoice::core::WasapiEndpoint recorder(captures[c_idx], cfg, cap_ring);
+    muxella::core::WasapiEndpoint player(renders[r_idx], cfg, play_ring);
+    muxella::core::WasapiEndpoint recorder(captures[c_idx], cfg, cap_ring);
 
     if (!recorder.start()) {
-        std::cout << "Failed to start recorder on MetVoice Out B1!\n";
+        std::cout << "Failed to start recorder on Muxella Out B1!\n";
         return 1;
     }
     if (!player.start()) {
-        std::cout << "Failed to start player on MetVoice Out B1 Link!\n";
+        std::cout << "Failed to start player on Muxella Out B1 Link!\n";
         recorder.stop();
         return 1;
     }

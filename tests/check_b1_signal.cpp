@@ -1,4 +1,4 @@
-#include "metvoice/core/wasapi_backend.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -6,22 +6,22 @@
 #include <cmath>
 
 int main() {
-    auto captures = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Capture);
+    auto captures = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Capture);
     int b1_idx = -1;
     for (size_t i = 0; i < captures.size(); ++i) {
-        if (captures[i].friendly_name.find(L"MetVoice Out B1") != std::wstring::npos) {
+        if (captures[i].friendly_name.find(L"Muxella Out B1") != std::wstring::npos) {
             b1_idx = static_cast<int>(i);
             break;
         }
     }
     if (b1_idx == -1) {
-        std::cout << "MetVoice Out B1 not found\n";
+        std::cout << "Muxella Out B1 not found\n";
         return 1;
     }
     std::wcout << L"Reading from Windows Recording Device: " << captures[b1_idx].friendly_name << L"\n";
-    auto ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(16384);
-    metvoice::core::AudioStreamConfig cfg{48000, 2, 480};
-    metvoice::core::WasapiEndpoint cap_ep(captures[b1_idx], cfg, ring);
+    auto ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(16384);
+    muxella::core::AudioStreamConfig cfg{48000, 2, 480};
+    muxella::core::WasapiEndpoint cap_ep(captures[b1_idx], cfg, ring);
     if (!cap_ep.start()) {
         std::cout << "Could not start capture endpoint\n";
         return 1;

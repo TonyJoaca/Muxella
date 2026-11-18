@@ -1,8 +1,8 @@
-#include "metvoice/core/wasapi_backend.hpp"
-#include "metvoice/core/asio_backend.hpp"
-#include "metvoice/core/mmcss.hpp"
-#include "metvoice/matrix/engine.hpp"
-#include "metvoice/ipc/named_pipe_server.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
+#include "muxella/core/asio_backend.hpp"
+#include "muxella/core/mmcss.hpp"
+#include "muxella/matrix/engine.hpp"
+#include "muxella/ipc/named_pipe_server.hpp"
 #include <iostream>
 #include <iomanip>
 #include <chrono>
@@ -70,8 +70,8 @@ int main(int argc, char* argv[]) {
 
     // 1. Enumerate WASAPI Audio Devices
     std::cout << "[Device Discovery] Enumerating WASAPI Audio Endpoints...\n";
-    auto capture_devices = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Capture);
-    auto render_devices = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
+    auto capture_devices = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Capture);
+    auto render_devices = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
 
     std::wcout << L"  Available Input / Capture Endpoints (" << capture_devices.size() << L"):\n";
     for (size_t i = 0; i < capture_devices.size(); ++i) {
@@ -91,7 +91,7 @@ int main(int argc, char* argv[]) {
 
     // 2. Discover Registered ASIO 2.0 Drivers
     std::cout << "\n[Hardware Discovery] Scanning Registered ASIO Drivers...\n";
-    auto asio_drivers = metvoice::core::AsioHostInterface::enumerate_drivers();
+    auto asio_drivers = muxella::core::AsioHostInterface::enumerate_drivers();
     if (asio_drivers.empty()) {
         std::cout << "  No hardware ASIO drivers registered in HKLM\\SOFTWARE\\ASIO.\n";
     } else {
@@ -108,7 +108,7 @@ int main(int argc, char* argv[]) {
     double latency_ms = (static_cast<double>(block_size) / static_cast<double>(sample_rate)) * 1000.0;
     std::cout << "\n[Engine Setup] Initializing 8x8 Matrix Mixer at " << static_cast<uint32_t>(sample_rate)
               << " Hz, block size " << block_size << " frames (~" << std::fixed << std::setprecision(1) << latency_ms << " ms)...\n";
-    metvoice::matrix::MixerEngine engine(NUM_STRIPS, NUM_BUSES, block_size, sample_rate);
+    muxella::matrix::MixerEngine engine(NUM_STRIPS, NUM_BUSES, block_size, sample_rate);
 
     // 5 Physical Inputs + 3 Virtual Inputs
     engine.set_strip_name(0, "Main Mic");
@@ -153,11 +153,11 @@ int main(int argc, char* argv[]) {
 
     // 4. Initialize Dynamic Endpoint Manager
     timeBeginPeriod(1);
-    metvoice::core::EndpointManager ep_mgr(engine);
+    muxella::core::EndpointManager ep_mgr(engine);
 
     // 5. Start Named Pipe IPC Server with EndpointManager
     std::cout << "[IPC Server] Starting control interface on \\\\.\\pipe\\Muxella_Control...\n";
-    metvoice::ipc::NamedPipeServer pipe_server(engine, &ep_mgr);
+    muxella::ipc::NamedPipeServer pipe_server(engine, &ep_mgr);
     pipe_server.set_shutdown_handler([&]() { g_shutdown.store(true); });
     pipe_server.start();
 
@@ -178,7 +178,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\n[Engine Active] Starting Real-Time Mixing Thread with High-Resolution MMCSS scheduling...\n";
     std::thread audio_engine_thread([&]() {
         // Elevate priority via MMCSS Pro Audio and TIME_CRITICAL thread priority
-        metvoice::core::ScopedMmcss mmcss(L"Pro Audio");
+        muxella::core::ScopedMmcss mmcss(L"Pro Audio");
 
         HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         if (!timer) {

@@ -1,4 +1,4 @@
-#include "metvoice/core/wasapi_backend.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -7,25 +7,25 @@
 
 int main() {
     std::cout << "=== Pin Pair Loopback Matrix Test ===\n";
-    auto renders = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
-    auto captures = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Capture);
+    auto renders = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
+    auto captures = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Capture);
 
     int b1_cap_idx = -1;
     for (size_t i = 0; i < captures.size(); ++i) {
-        if (captures[i].friendly_name.find(L"MetVoice Out B1") != std::wstring::npos) {
+        if (captures[i].friendly_name.find(L"Muxella Out B1") != std::wstring::npos) {
             b1_cap_idx = static_cast<int>(i);
             break;
         }
     }
 
     if (b1_cap_idx == -1) {
-        std::cout << "Could not find MetVoice Out B1 capture!\n";
+        std::cout << "Could not find Muxella Out B1 capture!\n";
         return 1;
     }
 
     std::wcout << L"Testing target capture: " << captures[b1_cap_idx].friendly_name << L"\n\n";
 
-    metvoice::core::AudioStreamConfig cfg;
+    muxella::core::AudioStreamConfig cfg;
     cfg.sample_rate = 48000;
     cfg.channels = 2;
     cfg.buffer_frames = 480;
@@ -40,11 +40,11 @@ int main() {
 
         std::wcout << L"--> Testing Render [" << r << L"]: " << renders[r].friendly_name << L"... ";
 
-        auto cap_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(16384);
-        auto ren_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(16384);
+        auto cap_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(16384);
+        auto ren_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(16384);
 
-        metvoice::core::WasapiEndpoint cap_ep(captures[b1_cap_idx], cfg, cap_ring);
-        metvoice::core::WasapiEndpoint ren_ep(renders[r], cfg, ren_ring);
+        muxella::core::WasapiEndpoint cap_ep(captures[b1_cap_idx], cfg, cap_ring);
+        muxella::core::WasapiEndpoint ren_ep(renders[r], cfg, ren_ring);
 
         if (!cap_ep.start() || !ren_ep.start()) {
             std::cout << "Failed to start!\n";

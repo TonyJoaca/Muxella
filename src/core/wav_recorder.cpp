@@ -1,5 +1,5 @@
-#include "metvoice/core/wav_recorder.hpp"
-#include "metvoice/core/ring_buffer.hpp"
+﻿#include "muxella/core/wav_recorder.hpp"
+#include "muxella/core/ring_buffer.hpp"
 #include <windows.h>
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <limits>
 
-namespace metvoice::core {
+namespace muxella::core {
 namespace {
 using Json = nlohmann::json;
 std::wstring widen(const std::string& value) {

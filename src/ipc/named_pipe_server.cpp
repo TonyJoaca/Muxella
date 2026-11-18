@@ -1,9 +1,9 @@
-#include "metvoice/ipc/named_pipe_server.hpp"
-#include "metvoice/ipc/protocol.hpp"
+﻿#include "muxella/ipc/named_pipe_server.hpp"
+#include "muxella/ipc/protocol.hpp"
 #include <array>
 #include <iostream>
 
-namespace metvoice::ipc {
+namespace muxella::ipc {
 namespace {
 // Keep OVERLAPPED alive until cancellation completes; every wait observes stop.
 bool complete_io(HANDLE pipe, HANDLE stop, OVERLAPPED& operation, BOOL immediate,
@@ -99,4 +99,4 @@ void NamedPipeServer::server_worker_thread() {
     }
     running_.store(false);
 }
-} // namespace metvoice::ipc
+} // namespace muxella::ipc

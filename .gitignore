@@ -1,11 +1,39 @@
+# Build & Binary Outputs
 build/
 bin/
 dist/
 *.exe
+*.dll
+*.so
+*.dylib
 *.o
+*.obj
 *.a
-.vscode/
-.idea/
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# PyInstaller & Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.spec.bak
+.pytest_cache/
+*.egg-info/
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.sln
+*.vcxproj*
+.vs/
+*.swp
+*~
+
+# Logs & Temporary Files
+*.log
+*.tmp
 muxella_crackle_*.txt
+*.bak

@@ -1,8 +1,8 @@
-#include "metvoice/usbip/byte_ring.hpp"
-#include "metvoice/usbip/protocol.hpp"
-#include "metvoice/usbip/server.hpp"
-#include "metvoice/usbip/uac1_device.hpp"
-#include "metvoice/usbip/win_rt_socket.hpp"
+﻿#include "muxella/usbip/byte_ring.hpp"
+#include "muxella/usbip/protocol.hpp"
+#include "muxella/usbip/server.hpp"
+#include "muxella/usbip/uac1_device.hpp"
+#include "muxella/usbip/win_rt_socket.hpp"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -25,7 +25,7 @@
         }                                                                                           \
     } while (0)
 
-using namespace metvoice::usbip;
+using namespace muxella::usbip;
 
 namespace {
 

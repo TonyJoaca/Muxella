@@ -1,13 +1,13 @@
-"""Serialized IPC worker with cached reads and coalesced control updates."""
+﻿"""Serialized IPC worker with cached reads and coalesced control updates."""
 import json
 import threading
 import time
 from collections import OrderedDict
 from PyQt6.QtCore import QObject, pyqtSignal
-from gui.pipe_client import MetVoicePipeClient
+from gui.pipe_client import MuxellaPipeClient
 
 
-class AsyncPipeClient(QObject, MetVoicePipeClient):
+class AsyncPipeClient(QObject, MuxellaPipeClient):
     devices_ready = pyqtSignal(object)
     task_finished = pyqtSignal(str, object)
     attachment_finished = pyqtSignal(object)

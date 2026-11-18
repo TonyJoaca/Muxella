@@ -1,4 +1,4 @@
-#include "metvoice/core/wasapi_backend.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
 #include <iostream>
 #include <vector>
 #include <thread>
@@ -6,28 +6,28 @@
 #include <cmath>
 
 int main() {
-    std::cout << "=== Scanning which Render Device loops into MetVoice Out B1 ===\n";
-    auto renders = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
-    auto captures = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Capture);
+    std::cout << "=== Scanning which Render Device loops into Muxella Out B1 ===\n";
+    auto renders = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
+    auto captures = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Capture);
 
     int c_idx = -1;
     for (size_t i = 0; i < captures.size(); ++i) {
-        if (captures[i].friendly_name.find(L"MetVoice Out B1") != std::wstring::npos) {
+        if (captures[i].friendly_name.find(L"Muxella Out B1") != std::wstring::npos) {
             c_idx = static_cast<int>(i);
             break;
         }
     }
 
     if (c_idx == -1) {
-        std::cout << "MetVoice Out B1 not found!\n";
+        std::cout << "Muxella Out B1 not found!\n";
         return 1;
     }
 
-    metvoice::core::AudioStreamConfig cfg{48000, 2, 480};
-    auto cap_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-    metvoice::core::WasapiEndpoint recorder(captures[c_idx], cfg, cap_ring);
+    muxella::core::AudioStreamConfig cfg{48000, 2, 480};
+    auto cap_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+    muxella::core::WasapiEndpoint recorder(captures[c_idx], cfg, cap_ring);
     if (!recorder.start()) {
-        std::cout << "Failed to start recorder on MetVoice Out B1\n";
+        std::cout << "Failed to start recorder on Muxella Out B1\n";
         return 1;
     }
 
@@ -35,8 +35,8 @@ int main() {
         std::wcout << L"Testing Render [" << r << L"] " << renders[r].friendly_name << L"... ";
         std::cout.flush();
 
-        auto play_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-        metvoice::core::WasapiEndpoint player(renders[r], cfg, play_ring);
+        auto play_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+        muxella::core::WasapiEndpoint player(renders[r], cfg, play_ring);
         if (!player.start()) {
             std::cout << "Cannot start render\n";
             continue;
@@ -72,7 +72,7 @@ int main() {
         player.stop();
         std::cout << "Peak captured: " << max_cap << "\n";
         if (max_cap > 0.05f) {
-            std::wcout << L"*** MATCH FOUND: " << renders[r].friendly_name << L" LOOPS DIRECTLY INTO MetVoice Out B1! ***\n";
+            std::wcout << L"*** MATCH FOUND: " << renders[r].friendly_name << L" LOOPS DIRECTLY INTO Muxella Out B1! ***\n";
         }
     }
 

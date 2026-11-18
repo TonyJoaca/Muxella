@@ -1,4 +1,4 @@
-#include "metvoice/core/app_sessions.hpp"
+﻿#include "muxella/core/app_sessions.hpp"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <mmdeviceapi.h>
@@ -10,7 +10,7 @@
 #include <functional>
 #include <cmath>
 
-namespace metvoice::core {
+namespace muxella::core {
 namespace {
 using Json = nlohmann::json;
 template<class T> struct Com {

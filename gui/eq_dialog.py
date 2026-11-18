@@ -1,4 +1,4 @@
-import math
+﻿import math
 from typing import Optional, Callable
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal, QPointF
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QPainterPath
@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.widgets import CyberSlider, BlockyKnob
-from gui.pipe_client import MetVoicePipeClient
+from gui.pipe_client import MuxellaPipeClient
 from gui.theme import (
     BG_BLACK, SURFACE_CARD, BORDER_OUTLINE, ACCENT_CYAN, ACCENT_GREEN,
     ACCENT_PURPLE, TEXT_PRIMARY, TEXT_MUTED, TEXT_DIM
@@ -312,7 +312,7 @@ class CyberEqualizerDialog(QDialog):
     - Live synchronization with C++ audio engine
     """
     def __init__(self, bus_id: int, bus_code: str, bus_name: str,
-                 client: MetVoicePipeClient, on_state_changed: Optional[Callable] = None, parent=None):
+                 client: MuxellaPipeClient, on_state_changed: Optional[Callable] = None, parent=None):
         super().__init__(parent)
         self.bus_id = bus_id
         self.bus_code = bus_code
@@ -320,7 +320,7 @@ class CyberEqualizerDialog(QDialog):
         self.client = client
         self.on_state_changed = on_state_changed
 
-        self.setWindowTitle(f"METVOICE // EQUALIZER - {bus_code} ({bus_name})")
+        self.setWindowTitle(f"Muxella // EQUALIZER - {bus_code} ({bus_name})")
         self.resize(540, 480)
         self.setMinimumSize(500, 440)
 

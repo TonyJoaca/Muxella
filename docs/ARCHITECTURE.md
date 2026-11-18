@@ -1,6 +1,6 @@
-# MetVoice Architecture Specification
+﻿# Muxella Architecture Specification
 
-MetVoice is a high-performance, open-source virtual audio matrix router and mixing workstation designed for low-latency Windows environments as a clean-room alternative to legacy tools.
+Muxella is a high-performance, open-source virtual audio matrix router and mixing workstation designed for low-latency Windows environments as a clean-room alternative to legacy tools.
 
 ---
 
@@ -26,7 +26,7 @@ MetVoice is a high-performance, open-source virtual audio matrix router and mixi
                                       |
                                       v
   +-----------------------------------------------------------------------+
-  |              MetVoice Real-Time Core (MMCSS "Pro Audio")              |
+  |              Muxella Real-Time Core (MMCSS "Pro Audio")              |
   |                                                                       |
   |  +-----------------------------------------------------------------+  |
   |  | Input Strips (1..N)                                             |  |
@@ -90,7 +90,7 @@ Inside `MixerEngine::process_block()` and WASAPI audio pump routines:
 
 When bridging physical USB devices (e.g., a USB microphone running on crystal oscillator A) to output audio devices (e.g., a soundcard running on oscillator B), their effective sample rates differ slightly (e.g., 48,000.5 Hz vs 47,999.8 Hz).
 
-MetVoice solves this cleanly via `ClockDriftCorrector`:
+Muxella solves this cleanly via `ClockDriftCorrector`:
 - A closed-loop Proportional-Integral (PI) feedback loop observes the fill level of the intermediate ring buffer against the nominal target (50% capacity).
 - An adaptive resample ratio $r = 1.0 + K_p \cdot e + K_i \int e\,dt$ is dynamically maintained.
 - Audio is resampled in real-time using a 4-point Catmull-Rom cubic Hermite spline interpolation:
@@ -127,7 +127,7 @@ This guarantees that summed signals across multiple strips never clip into digit
 
 ## 5. Control & Inter-Process Communication (IPC)
 
-Control of MetVoice is completely decoupled from the audio engine thread. External graphical user interfaces (Qt, Slint, Dear ImGui, Electron) and command-line tools interface through a Windows Named Pipe (`\\.\pipe\Muxella_Control`):
+Control of Muxella is completely decoupled from the audio engine thread. External graphical user interfaces (Qt, Slint, Dear ImGui, Electron) and command-line tools interface through a Windows Named Pipe (`\\.\pipe\Muxella_Control`):
 
 - **Status & Telemetry:**
   `meters` -> Returns JSON containing Peak L/R, RMS L/R, Gain Reduction, and Limiter clip counts.

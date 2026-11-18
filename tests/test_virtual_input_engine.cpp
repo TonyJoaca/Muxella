@@ -1,6 +1,6 @@
-#include "metvoice/core/wasapi_backend.hpp"
-#include "metvoice/core/endpoint_manager.hpp"
-#include "metvoice/matrix/engine.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
+#include "muxella/core/endpoint_manager.hpp"
+#include "muxella/matrix/engine.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -14,24 +14,24 @@ int main() {
     constexpr size_t BLOCK_SIZE = 480;
     constexpr float SAMPLE_RATE = 48000.0f;
 
-    metvoice::matrix::MixerEngine engine(NUM_STRIPS, NUM_BUSES, BLOCK_SIZE, SAMPLE_RATE);
-    metvoice::core::EndpointManager ep_mgr(engine);
+    muxella::matrix::MixerEngine engine(NUM_STRIPS, NUM_BUSES, BLOCK_SIZE, SAMPLE_RATE);
+    muxella::core::EndpointManager ep_mgr(engine);
 
     // Route Strip 5 -> Bus 0
     engine.routing().set_route(5, 0, true, 0.0f);
     engine.bus(0).set_mute(false);
 
-    // Attach Strip 5 to MetVoice Main VAIO
-    bool attached = ep_mgr.attach_input(5, "MetVoice Main VAIO");
+    // Attach Strip 5 to Muxella Main VAIO
+    bool attached = ep_mgr.attach_input(5, "Muxella Main VAIO");
     std::cout << "Attach Strip 5 result: " << (attached ? "SUCCESS" : "FAILED") << "\n";
     if (!attached) return 1;
 
-    // Start a test playback into MetVoice Main VAIO to simulate an app playing sound
-    auto renders = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
-    metvoice::core::DeviceInfo main_vaio_dev;
+    // Start a test playback into Muxella Main VAIO to simulate an app playing sound
+    auto renders = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
+    muxella::core::DeviceInfo main_vaio_dev;
     bool found_render = false;
     for (const auto& dev : renders) {
-        if (dev.friendly_name.find(L"MetVoice Main VAIO") != std::wstring::npos) {
+        if (dev.friendly_name.find(L"Muxella Main VAIO") != std::wstring::npos) {
             main_vaio_dev = dev;
             found_render = true;
             break;
@@ -42,11 +42,11 @@ int main() {
         return 1;
     }
 
-    metvoice::core::AudioStreamConfig cfg{48000, 2, 480};
-    auto test_play_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-    metvoice::core::WasapiEndpoint test_player(main_vaio_dev, cfg, test_play_ring);
+    muxella::core::AudioStreamConfig cfg{48000, 2, 480};
+    auto test_play_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+    muxella::core::WasapiEndpoint test_player(main_vaio_dev, cfg, test_play_ring);
     if (!test_player.start()) {
-        std::cerr << "Failed to start test player on MetVoice Main VAIO\n";
+        std::cerr << "Failed to start test player on Muxella Main VAIO\n";
         return 1;
     }
 

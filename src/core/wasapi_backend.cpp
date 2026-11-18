@@ -1,5 +1,5 @@
-#include "metvoice/core/wasapi_backend.hpp"
-#include "metvoice/core/mmcss.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
+#include "muxella/core/mmcss.hpp"
 #include <functiondiscoverykeys_devpkey.h>
 #include <initguid.h>
 #include <iostream>
@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace metvoice::core {
+namespace muxella::core {
 
 namespace {
 #ifndef AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK
@@ -1031,4 +1031,4 @@ void WasapiEndpoint::render_thread_proc() {
     if (co_init) CoUninitialize();
 }
 
-} // namespace metvoice::core
+} // namespace muxella::core

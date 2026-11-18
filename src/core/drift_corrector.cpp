@@ -1,6 +1,6 @@
-#include "metvoice/core/drift_corrector.hpp"
+﻿#include "muxella/core/drift_corrector.hpp"
 
-namespace metvoice::core {
+namespace muxella::core {
 
 // 4-point Catmull-Rom cubic interpolation
 // p0: y[n-1], p1: y[n], p2: y[n+1], p3: y[n+2], t: fractional offset in [0, 1)
@@ -121,4 +121,4 @@ size_t ClockDriftCorrector::process(const float* const* in_channel_ptrs, size_t 
     return out_idx;
 }
 
-} // namespace metvoice::core
+} // namespace muxella::core

@@ -1,4 +1,4 @@
-#include "metvoice/core/ring_buffer.hpp"
+﻿#include "muxella/core/ring_buffer.hpp"
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -6,7 +6,7 @@
 
 void test_single_thread_basic() {
     std::cout << "[Test] Ring Buffer: Single-thread basic read/write... ";
-    metvoice::core::SpscRingBuffer<float> rb(128);
+    muxella::core::SpscRingBuffer<float> rb(128);
     assert(rb.capacity() == 128);
     assert(rb.available_read() == 0);
     assert(rb.available_write() == 128);
@@ -26,7 +26,7 @@ void test_single_thread_basic() {
 
 void test_overrun_and_underrun() {
     std::cout << "[Test] Ring Buffer: Overrun and underrun tracking... ";
-    metvoice::core::SpscRingBuffer<float> rb(64);
+    muxella::core::SpscRingBuffer<float> rb(64);
 
     // Try to read when empty -> underrun
     std::vector<float> out(10);
@@ -49,7 +49,7 @@ void test_overrun_and_underrun() {
 
 void test_multithreaded_stress() {
     std::cout << "[Test] Ring Buffer: Multithreaded SPSC concurrency stress (1,000,000 items)... ";
-    metvoice::core::SpscRingBuffer<uint32_t> rb(1024);
+    muxella::core::SpscRingBuffer<uint32_t> rb(1024);
     constexpr uint32_t TOTAL_ITEMS = 1000000;
 
     std::thread producer([&]() {

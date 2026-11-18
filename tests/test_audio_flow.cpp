@@ -1,4 +1,4 @@
-#include "metvoice/core/wasapi_backend.hpp"
+﻿#include "muxella/core/wasapi_backend.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -7,12 +7,12 @@
 
 int main() {
     std::cout << "=== Loopback Audio Flow Test ===\n";
-    auto renders = metvoice::core::WasapiEndpoint::enumerate_devices(metvoice::core::DeviceType::Render);
+    auto renders = muxella::core::WasapiEndpoint::enumerate_devices(muxella::core::DeviceType::Render);
 
-    metvoice::core::DeviceInfo main_vaio_render;
+    muxella::core::DeviceInfo main_vaio_render;
     bool found = false;
     for (const auto& dev : renders) {
-        if (dev.friendly_name.find(L"MetVoice Main VAIO") != std::wstring::npos) {
+        if (dev.friendly_name.find(L"Muxella Main VAIO") != std::wstring::npos) {
             main_vaio_render = dev;
             found = true;
             std::wcout << L"Found render device: " << dev.friendly_name << L"\n";
@@ -21,16 +21,16 @@ int main() {
     }
 
     if (!found) {
-        std::cerr << "MetVoice Main VAIO render device not found!\n";
+        std::cerr << "Muxella Main VAIO render device not found!\n";
         return 1;
     }
 
-    // 1. Setup Loopback Capture on MetVoice Main VAIO
-    metvoice::core::DeviceInfo loop_info = main_vaio_render;
-    loop_info.type = metvoice::core::DeviceType::LoopbackRender;
-    metvoice::core::AudioStreamConfig cfg{48000, 2, 480};
-    auto capture_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-    metvoice::core::WasapiEndpoint loop_capture(loop_info, cfg, capture_ring);
+    // 1. Setup Loopback Capture on Muxella Main VAIO
+    muxella::core::DeviceInfo loop_info = main_vaio_render;
+    loop_info.type = muxella::core::DeviceType::LoopbackRender;
+    muxella::core::AudioStreamConfig cfg{48000, 2, 480};
+    auto capture_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+    muxella::core::WasapiEndpoint loop_capture(loop_info, cfg, capture_ring);
 
     if (!loop_capture.start()) {
         std::cerr << "Failed to start loopback capture!\n";
@@ -38,9 +38,9 @@ int main() {
     }
     std::cout << "Loopback capture started successfully.\n";
 
-    // 2. Setup Render on MetVoice Main VAIO and feed a 440Hz sine wave
-    auto render_ring = std::make_shared<metvoice::core::SpscRingBuffer<float>>(32768);
-    metvoice::core::WasapiEndpoint test_render(main_vaio_render, cfg, render_ring);
+    // 2. Setup Render on Muxella Main VAIO and feed a 440Hz sine wave
+    auto render_ring = std::make_shared<muxella::core::SpscRingBuffer<float>>(32768);
+    muxella::core::WasapiEndpoint test_render(main_vaio_render, cfg, render_ring);
     if (!test_render.start()) {
         std::cerr << "Failed to start test render playback!\n";
         loop_capture.stop();

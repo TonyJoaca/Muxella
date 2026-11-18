@@ -1,7 +1,7 @@
-#include "metvoice/dsp/biquad.hpp"
+﻿#include "muxella/dsp/biquad.hpp"
 #include <algorithm>
 
-namespace metvoice::dsp {
+namespace muxella::dsp {
 
 BiquadFilter::BiquadFilter() {
     reset();
@@ -105,4 +105,4 @@ void BiquadFilter::configure(FilterType type, float sample_rate, float frequency
     a2_ = a2 * inv_a0;
 }
 
-} // namespace metvoice::dsp
+} // namespace muxella::dsp

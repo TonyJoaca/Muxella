@@ -1,12 +1,12 @@
-#include "metvoice/core/endpoint_manager.hpp"
-#include "metvoice/core/app_sessions.hpp"
+﻿#include "muxella/core/endpoint_manager.hpp"
+#include "muxella/core/app_sessions.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <iostream>
 
-namespace metvoice::core {
+namespace muxella::core {
 namespace {
 
 std::string utf8(const std::wstring& value) {
@@ -703,4 +703,4 @@ void EndpointManager::reset_health() {
     }
 }
 
-} // namespace metvoice::core
+} // namespace muxella::core

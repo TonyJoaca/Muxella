@@ -1,11 +1,11 @@
-#include "metvoice/ipc/protocol.hpp"
-#include "metvoice/core/endpoint_manager.hpp"
-#include "metvoice/core/app_sessions.hpp"
+﻿#include "muxella/ipc/protocol.hpp"
+#include "muxella/core/endpoint_manager.hpp"
+#include "muxella/core/app_sessions.hpp"
 #include <nlohmann/json.hpp>
 #include <cmath>
 #include <unordered_map>
 
-namespace metvoice::ipc {
+namespace muxella::ipc {
 using Json = nlohmann::json;
 namespace {
 std::string reply(const Json& value) {
@@ -219,4 +219,4 @@ std::string CommandDispatcher::execute_command(matrix::MixerEngine& engine, core
     else result[command == "bus_gain" ? "gain" : command] = value;
     return reply(result);
 }
-} // namespace metvoice::ipc
+} // namespace muxella::ipc

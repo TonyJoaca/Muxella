@@ -1,4 +1,4 @@
-from gui.channel_enable import ChannelEnableMixin
+﻿from gui.channel_enable import ChannelEnableMixin
 from gui.virtual_audio import device_matches, resolve_selection
 import os
 import sys
@@ -92,14 +92,14 @@ def get_settings_path() -> Path:
     appdata = os.environ.get("APPDATA")
     if appdata:
         base_dir = Path(appdata) / "Muxella"
-        old_dir = Path(appdata) / "MetVoice"
+        old_dir = Path(appdata) / "Muxella"
     else:
         base_dir = Path.home() / ".config" / "Muxella"
-        old_dir = Path.home() / ".config" / "MetVoice"
+        old_dir = Path.home() / ".config" / "Muxella"
     base_dir.mkdir(parents=True, exist_ok=True)
     target = base_dir / "settings.json"
 
-    # Migrate any settings or presets from old MetVoice directory to Muxella
+    # Migrate any settings or presets from old Muxella directory to Muxella
     if old_dir.exists():
         try:
             import shutil
@@ -129,7 +129,7 @@ def is_start_with_windows_enabled() -> bool:
             winreg.KEY_READ
         )
         val = None
-        for k in ["Muxella", "MetVoice"]:
+        for k in ["Muxella", "Muxella"]:
             try:
                 val, _ = winreg.QueryValueEx(key, k)
                 if val: break
@@ -166,11 +166,11 @@ def set_start_with_windows(enable: bool) -> bool:
             winreg.SetValueEx(key, "Muxella", 0, winreg.REG_SZ, cmd)
             # Remove legacy key if present
             try:
-                winreg.DeleteValue(key, "MetVoice")
+                winreg.DeleteValue(key, "Muxella")
             except FileNotFoundError:
                 pass
         else:
-            for k in ["Muxella", "MetVoice"]:
+            for k in ["Muxella", "Muxella"]:
                 try:
                     winreg.DeleteValue(key, k)
                 except FileNotFoundError:
@@ -1821,7 +1821,8 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
             return
         self._attach_retry_at = 0
         devs = self.get_devices_func() or {}
-        device = resolve_selection(cleaned, self.cached_device_id, devs.get("renders", []), [],
+        secondary = devs.get("captures", []) if getattr(self, "is_virtual", False) else []
+        device = resolve_selection(cleaned, self.cached_device_id, devs.get("renders", []), secondary,
                                    extra=devs.get("asios", []))
         if device:
             raw_id = device.get("id")
@@ -1841,7 +1842,10 @@ class MasterBusStrip(ChannelEnableMixin, QFrame):
             attached = self.client.attach_output(self.bus_id, query)
             if attached is not None:
                 self.set_device_connected(attached)
-            self.log_callback(f"Device connection requested: {device['name']}")
+            if attached is False:
+                self.log_callback(f"device found but output attachment failed: {cleaned}")
+            else:
+                self.log_callback(f"Device connection requested: {device['name']}")
         else:
             self.client.send_command(f"detach_output {self.bus_id}")
             self.set_device_connected(False)
@@ -2265,7 +2269,7 @@ class MuxellaMainWindow(QMainWindow):
         out_extra = list(devs.get("asios", []))
         groups = [(getattr(self, "physical_strips", []), "input", captures, renders, in_extra),
                   (getattr(self, "virtual_strips", []), "input", captures, renders, in_extra),
-                  (getattr(self, "master_buses", []), "output", renders, [], out_extra)]
+                  (getattr(self, "master_buses", []), "output", renders, captures, out_extra)]
         for strips, kind, preferred, secondary, extra in groups:
             names = devs.get("attached_inputs" if kind == "input" else "attached_outputs", [])
             ids = devs.get("attached_input_ids" if kind == "input" else "attached_output_ids", [])
@@ -2296,7 +2300,12 @@ class MuxellaMainWindow(QMainWindow):
                         query = ("exclusive:" if is_exclusive else "") + device["name"]
                     strip.cached_device_id = endpoint_id
                     strip.dev_btn.selected_device_id = endpoint_id
-                    attached = bool(endpoint_id and attached_id == endpoint_id)
+                    cur_name = names[index] if index < len(names) else ""
+                    attached = bool((endpoint_id and attached_id == endpoint_id) or
+                                    (cur_name and cur_name != "None" and
+                                     (cur_name == selected or cur_name == device["name"] or
+                                      device_matches(selected, cur_name) or
+                                      device_matches(cleaned if 'cleaned' in locals() else selected, cur_name))))
                     if attached:
                         strip.set_device_connected(True)
                     else:
@@ -2304,7 +2313,9 @@ class MuxellaMainWindow(QMainWindow):
                         if time.monotonic() < getattr(strip, "_attach_retry_at", 0):
                             continue
                         attach = self.client.attach_input if kind == "input" else self.client.attach_output
-                        attach(index, query)
+                        res = attach(index, query)
+                        if res is not None:
+                            strip.set_device_connected(res)
                 else:
                     if attached_id or (index < len(names) and names[index] != "None"):
                         self.client.send_command(f"detach_{kind} {index}")
@@ -3390,5 +3401,5 @@ class MuxellaMainWindow(QMainWindow):
         event.accept()
 
 # Backward compatibility alias
-MetVoiceMainWindow = MuxellaMainWindow
+MuxellaMainWindow = MuxellaMainWindow
 

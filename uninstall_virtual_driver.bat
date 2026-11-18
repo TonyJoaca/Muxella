@@ -1,6 +1,6 @@
-@echo off
+﻿@echo off
 echo ========================================================
-echo  MetVoice Device Restore
+echo  Muxella Device Restore
 echo ========================================================
 echo.
 echo Requesting Administrator privileges to restore names...

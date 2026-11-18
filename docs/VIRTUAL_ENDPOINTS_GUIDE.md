@@ -1,4 +1,4 @@
-# Windows Virtual Audio Endpoints & Driver Layer Guide
+﻿# Windows Virtual Audio Endpoints & Driver Layer Guide
 
 This document analyzes the strategies for exposing virtual input and output endpoints in Windows, comparing driver-based and driverless approaches in a clean-room, standards-compliant architecture.
 
@@ -23,11 +23,11 @@ The official Microsoft reference sample for creating virtual audio endpoints is 
 1. **Virtual WaveRT Miniport:**
    - Sysvad exposes a virtual `IMiniportWaveRT` and `IMiniportWaveRTStream` interface to Windows PortCls.
    - It registers two pins:
-     - **Render Pin:** Appears to Windows applications as a Playback Device (e.g. *"MetVoice Virtual Input 1"*).
-     - **Capture Pin:** Appears to Windows applications as a Recording Device (e.g. *"MetVoice Virtual Output 1"*).
+     - **Render Pin:** Appears to Windows applications as a Playback Device (e.g. *"Muxella Virtual Input 1"*).
+     - **Capture Pin:** Appears to Windows applications as a Recording Device (e.g. *"Muxella Virtual Output 1"*).
 2. **Buffer Sharing:**
    - When an application renders audio to the Virtual Render Pin, the driver places the PCM packets into a circular buffer allocated in Kernel Non-Paged Pool.
-   - An IOCTL or shared memory section (`MmMapLockedPagesSpecifyCache`) allows the MetVoice user-mode audio engine to ingest the data without kernel-user copying overhead.
+   - An IOCTL or shared memory section (`MmMapLockedPagesSpecifyCache`) allows the Muxella user-mode audio engine to ingest the data without kernel-user copying overhead.
 3. **Deployment Considerations:**
    - On 64-bit Windows 10/11, kernel drivers require Microsoft WHQL attestation signing or Secure Boot test signing (`bcdedit /set testsigning on`).
 
@@ -35,7 +35,7 @@ The official Microsoft reference sample for creating virtual audio endpoints is 
 
 ## 3. Approach B: Driverless Architecture via WASAPI Loopback
 
-For users and environments where installing third-party kernel drivers is restricted (e.g. corporate laptops, gaming anti-cheat environments that flag unsigned drivers), MetVoice provides a 100% driverless mode:
+For users and environments where installing third-party kernel drivers is restricted (e.g. corporate laptops, gaming anti-cheat environments that flag unsigned drivers), Muxella provides a 100% driverless mode:
 
 ### Native WASAPI Loopback Capture
 Windows Vista and later natively support capturing any render endpoint's output stream:
@@ -48,7 +48,7 @@ DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOO
 client->Initialize(AUDCLNT_SHAREMODE_SHARED, stream_flags, buffer_duration, 0, mix_format, nullptr);
 ```
 
-By dedicating a secondary output device (or an existing unused HDMI/DisplayPort audio out channel) to an application, MetVoice captures the loopback stream into an Input Strip in real-time.
+By dedicating a secondary output device (or an existing unused HDMI/DisplayPort audio out channel) to an application, Muxella captures the loopback stream into an Input Strip in real-time.
 
 ---
 
@@ -82,7 +82,7 @@ public:
 };
 ```
 
-This allows MetVoice to direct targeted processes (e.g. `discord.exe`, `spotify.exe`, `game.exe`) into specific MetVoice virtual strips without user intervention.
+This allows Muxella to direct targeted processes (e.g. `discord.exe`, `spotify.exe`, `game.exe`) into specific Muxella virtual strips without user intervention.
 
 ---
 

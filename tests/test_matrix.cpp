@@ -1,4 +1,4 @@
-#include "metvoice/matrix/engine.hpp"
+﻿#include "muxella/matrix/engine.hpp"
 #include <iostream>
 #include <vector>
 #include <cassert>
@@ -10,7 +10,7 @@ void test_matrix_summing_and_routing() {
     constexpr size_t BUSES = 2;
     constexpr size_t FRAMES = 256;
 
-    metvoice::matrix::MixerEngine engine(STRIPS, BUSES, FRAMES);
+    muxella::matrix::MixerEngine engine(STRIPS, BUSES, FRAMES);
 
     // Route Strip 0 -> Bus 0 (gain 0dB = 1.0)
     // Route Strip 1 -> Bus 0 (gain -6dB ~ 0.501)
@@ -46,7 +46,7 @@ void test_solo_and_mute_arbitration() {
     constexpr size_t BUSES = 1;
     constexpr size_t FRAMES = 128;
 
-    metvoice::matrix::MixerEngine engine(STRIPS, BUSES, FRAMES);
+    muxella::matrix::MixerEngine engine(STRIPS, BUSES, FRAMES);
     engine.routing().set_route(0, 0, true, 0.0f);
     engine.routing().set_route(1, 0, true, 0.0f);
     engine.routing().set_route(2, 0, true, 0.0f);
@@ -87,7 +87,7 @@ void test_solo_and_mute_arbitration() {
 void test_starve_fade_continuity() {
     std::cout << "[Test] Matrix: Smooth fade-out and fade-in across strip starve... ";
     constexpr size_t FRAMES = 256;
-    metvoice::matrix::MixerEngine engine(1, 1, FRAMES);
+    muxella::matrix::MixerEngine engine(1, 1, FRAMES);
     engine.routing().set_route(0, 0, true, 0.0f);
     engine.input_connection_state(0)->store(true);
 
@@ -122,20 +122,20 @@ void test_starve_fade_continuity() {
 void test_cross_strip_duck_and_bus_delay() {
     std::cout << "[Test] Matrix: Cross-strip sidechain ducking and bus delay dispatch... ";
     constexpr size_t FRAMES = 480;
-    metvoice::matrix::MixerEngine engine(2, 1, FRAMES, 48000.0f);
+    muxella::matrix::MixerEngine engine(2, 1, FRAMES, 48000.0f);
     engine.routing().set_route(1, 0, true, 0.0f);
     engine.input_connection_state(0)->store(true);
     engine.input_connection_state(1)->store(true);
 
-    metvoice::matrix::MixerEngine::DspUpdate duck_upd{};
-    duck_upd.kind = metvoice::matrix::MixerEngine::DspKind::Duck;
+    muxella::matrix::MixerEngine::DspUpdate duck_upd{};
+    duck_upd.kind = muxella::matrix::MixerEngine::DspKind::Duck;
     duck_upd.index = 1;
     duck_upd.values[0] = 0.0f; // Trigger from strip 0
     duck_upd.values[1] = 8.0f; // Strong ducking
     assert(engine.enqueue_dsp(duck_upd));
 
-    metvoice::matrix::MixerEngine::DspUpdate dly_upd{};
-    dly_upd.kind = metvoice::matrix::MixerEngine::DspKind::BusDelay;
+    muxella::matrix::MixerEngine::DspUpdate dly_upd{};
+    dly_upd.kind = muxella::matrix::MixerEngine::DspKind::BusDelay;
     dly_upd.index = 0;
     dly_upd.values[0] = 10.0f;
     assert(engine.enqueue_dsp(dly_upd));

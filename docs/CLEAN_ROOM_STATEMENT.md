@@ -1,7 +1,7 @@
-# Clean-Room Engineering & Standards Compliance Statement
+﻿# Clean-Room Engineering & Standards Compliance Statement
 
 ## 1. Clean-Room Policy
-MetVoice was conceived and developed strictly adhering to **clean-room software engineering principles**:
+Muxella was conceived and developed strictly adhering to **clean-room software engineering principles**:
 - **Zero Proprietary Decompilation:** Closed-source commercial binaries (including VB-Audio VoiceMeeter, Virtual Audio Cable, or similar commercial software) were neither decompiled, disassembled, nor reverse-engineered.
 - **Independent Derivation:** All algorithms, mixing matrices, DSP biquad equations, lock-free ring buffer primitives, and synchronization routines were derived from first principles, published academic literature, and official Microsoft developer documentation.
 

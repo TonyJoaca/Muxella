@@ -1,4 +1,4 @@
-import ctypes
+﻿import ctypes
 from ctypes import wintypes
 import json
 import logging
@@ -250,6 +250,6 @@ class MuxellaPipeClient:
 
 
 # Backward compatibility alias
-MetVoicePipeClient = MuxellaPipeClient
+MuxellaPipeClient = MuxellaPipeClient
 
 

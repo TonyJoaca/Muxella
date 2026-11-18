@@ -1,14 +1,14 @@
-#include "metvoice/dsp/biquad.hpp"
-#include "metvoice/dsp/compressor.hpp"
-#include "metvoice/dsp/limiter.hpp"
-#include "metvoice/dsp/meter.hpp"
-#include "metvoice/dsp/gate.hpp"
-#include "metvoice/dsp/denoise.hpp"
-#include "metvoice/dsp/reverb.hpp"
-#include "metvoice/dsp/ducker.hpp"
-#include "metvoice/dsp/delay_line.hpp"
-#include "metvoice/dsp/lufs_meter.hpp"
-#include "metvoice/dsp/dsp_strip.hpp"
+﻿#include "muxella/dsp/biquad.hpp"
+#include "muxella/dsp/compressor.hpp"
+#include "muxella/dsp/limiter.hpp"
+#include "muxella/dsp/meter.hpp"
+#include "muxella/dsp/gate.hpp"
+#include "muxella/dsp/denoise.hpp"
+#include "muxella/dsp/reverb.hpp"
+#include "muxella/dsp/ducker.hpp"
+#include "muxella/dsp/delay_line.hpp"
+#include "muxella/dsp/lufs_meter.hpp"
+#include "muxella/dsp/dsp_strip.hpp"
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -17,9 +17,9 @@
 
 void test_biquad_lowpass() {
     std::cout << "[Test] DSP: Biquad Low-Pass filter frequency response... ";
-    metvoice::dsp::BiquadFilter lpf;
+    muxella::dsp::BiquadFilter lpf;
     constexpr float SAMPLE_RATE = 48000.0f;
-    lpf.configure(metvoice::dsp::FilterType::LowPass, SAMPLE_RATE, 1000.0f, 0.7071f);
+    lpf.configure(muxella::dsp::FilterType::LowPass, SAMPLE_RATE, 1000.0f, 0.7071f);
 
     // Feed 100 Hz sine wave (passband)
     float passband_power = 0.0f;
@@ -49,7 +49,7 @@ void test_biquad_lowpass() {
 void test_compressor_dynamics() {
     std::cout << "[Test] DSP: Dynamic range compressor gain reduction... ";
     constexpr float SAMPLE_RATE = 48000.0f;
-    metvoice::dsp::Compressor comp(SAMPLE_RATE);
+    muxella::dsp::Compressor comp(SAMPLE_RATE);
     // Threshold -20dB, 4:1 ratio, 5ms attack, 50ms release, 0dB makeup
     comp.configure(-20.0f, 4.0f, 5.0f, 50.0f, 0.0f, 0.0f);
 
@@ -67,7 +67,7 @@ void test_compressor_dynamics() {
 
 void test_limiter_ceiling_guarantee() {
     std::cout << "[Test] DSP: Soft Limiter ceiling enforcement under massive +12dB overload... ";
-    metvoice::dsp::SoftLimiter limiter(-0.1f); // Ceiling ~0.9885
+    muxella::dsp::SoftLimiter limiter(-0.1f); // Ceiling ~0.9885
 
     // Feed a heavy overdrive signal of amplitude 4.0 (+12 dBFS)
     std::vector<float> extreme_signal(1024, 4.0f);
@@ -85,7 +85,7 @@ void test_limiter_ceiling_guarantee() {
 
 void test_strip_fx_chain() {
     std::cout << "[Test] DSP: DspChannelStrip FX Chain (Gate, Denoiser, Reverb, Comp)... ";
-    metvoice::dsp::DspChannelStrip strip("TestStrip", 48000.0f);
+    muxella::dsp::DspChannelStrip strip("TestStrip", 48000.0f);
 
     strip.set_gate(5.0f);
     assert(strip.gate_amount() > 0.0f);
@@ -101,7 +101,7 @@ void test_strip_fx_chain() {
     assert(strip.reverb_amount() > 0.0f);
 
     // Process a test audio buffer
-    metvoice::core::AudioBuffer buf(2, 480);
+    muxella::core::AudioBuffer buf(2, 480);
     for (size_t ch = 0; ch < 2; ++ch) {
         float* d = buf.channel_data(ch);
         for (size_t f = 0; f < 480; ++f) {
@@ -124,7 +124,7 @@ void test_strip_fx_chain() {
 
 void test_rnnoise_denoiser_reduction() {
     std::cout << "[Test] DSP: RNNoise neural noise suppression on stationary noise... ";
-    metvoice::dsp::Denoiser denoiser(48000.0f);
+    muxella::dsp::Denoiser denoiser(48000.0f);
     denoiser.set_amount(8.0f); // Strong neural suppression
     assert(denoiser.is_enabled());
 
@@ -151,7 +151,7 @@ void test_rnnoise_denoiser_reduction() {
 
 void test_sidechain_ducker() {
     std::cout << "[Test] DSP: SidechainDucker key attenuation and release... ";
-    metvoice::dsp::SidechainDucker ducker(48000.0f);
+    muxella::dsp::SidechainDucker ducker(48000.0f);
     ducker.configure(0, 8.0f);
     assert(ducker.is_enabled());
 
@@ -171,7 +171,7 @@ void test_sidechain_ducker() {
 
 void test_stereo_delay_line() {
     std::cout << "[Test] DSP: StereoDelayLine 20 ms offset... ";
-    metvoice::dsp::StereoDelayLine delay(48000.0f);
+    muxella::dsp::StereoDelayLine delay(48000.0f);
     delay.set_delay_ms(20.0f); // 960 samples at 48 kHz
     delay.reset();
 
@@ -188,7 +188,7 @@ void test_stereo_delay_line() {
 
 void test_lufs_meter() {
     std::cout << "[Test] DSP: LufsMeter ITU-R BS.1770 K-weighted measurement... ";
-    metvoice::dsp::LufsMeter lufs(48000.0f);
+    muxella::dsp::LufsMeter lufs(48000.0f);
     std::vector<float> l(24000, 0.0f), r(24000, 0.0f);
     for (size_t i = 0; i < l.size(); ++i) {
         const float s = 0.25f * std::sin(2.0f * std::numbers::pi_v<float> * 1000.0f * i / 48000.0f);

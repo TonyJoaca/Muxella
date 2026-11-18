@@ -1,4 +1,4 @@
-#include "metvoice/usbip/win_rt_socket.hpp"
+﻿#include "muxella/usbip/win_rt_socket.hpp"
 #include <algorithm>
 #include <cstring>
 #include <mutex>
@@ -8,7 +8,7 @@
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
 
-namespace metvoice::usbip {
+namespace muxella::usbip {
 
 namespace {
 std::once_flag g_rt_once;
@@ -266,4 +266,4 @@ bool RtTcpSocket::write_all(const uint8_t* data, size_t len) noexcept {
     return true;
 }
 
-} // namespace metvoice::usbip
+} // namespace muxella::usbip

@@ -1,6 +1,6 @@
-#include "metvoice/matrix/engine.hpp"
+﻿#include "muxella/matrix/engine.hpp"
 
-namespace metvoice::matrix {
+namespace muxella::matrix {
 
 namespace {
     size_t compute_strip_target_cushion(size_t max_block_frames, bool virtual_cable) noexcept {
@@ -402,4 +402,4 @@ void MixerEngine::reset_telemetry() noexcept {
     engine_debug_events_.reset();
 }
 
-} // namespace metvoice::matrix
+} // namespace muxella::matrix

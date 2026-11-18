@@ -1,10 +1,10 @@
-#include "metvoice/usbip/uac1_device.hpp"
+﻿#include "muxella/usbip/uac1_device.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 
-namespace metvoice::usbip {
+namespace muxella::usbip {
 
 namespace {
 
@@ -433,4 +433,4 @@ size_t Uac1Device::read_capture(uint8_t* dst, size_t len) {
     return read;
 }
 
-} // namespace metvoice::usbip
+} // namespace muxella::usbip

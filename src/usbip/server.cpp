@@ -1,10 +1,10 @@
-#include "metvoice/usbip/server.hpp"
-#include "metvoice/core/mmcss.hpp"
+﻿#include "muxella/usbip/server.hpp"
+#include "muxella/core/mmcss.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 
-namespace metvoice::usbip {
+namespace muxella::usbip {
 
 namespace {
 
@@ -861,4 +861,4 @@ void UsbipServer::handle_connection(SOCKET client_sock, std::string remote_addr)
     log("USB/IP session closed for " + device->bus_id());
 }
 
-} // namespace metvoice::usbip
+} // namespace muxella::usbip

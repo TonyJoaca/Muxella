@@ -1,4 +1,4 @@
-#include "metvoice/core/drift_corrector.hpp"
+﻿#include "muxella/core/drift_corrector.hpp"
 #include <iostream>
 #include <vector>
 #include <cassert>
@@ -8,7 +8,7 @@ void test_drift_correction() {
     std::cout << "[Test] Drift Corrector: Closed-loop PI feedback and cubic resampling... ";
     constexpr size_t CHANNELS = 2;
     constexpr size_t TARGET_FILL = 1000;
-    metvoice::core::ClockDriftCorrector corrector(CHANNELS, TARGET_FILL);
+    muxella::core::ClockDriftCorrector corrector(CHANNELS, TARGET_FILL);
 
     // Initial ratio is 1.0
     assert(std::abs(corrector.current_ratio() - 1.0) < 1e-4);

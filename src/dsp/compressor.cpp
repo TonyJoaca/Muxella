@@ -1,6 +1,6 @@
-#include "metvoice/dsp/compressor.hpp"
+﻿#include "muxella/dsp/compressor.hpp"
 
-namespace metvoice::dsp {
+namespace muxella::dsp {
 
 Compressor::Compressor(float sample_rate)
     : sample_rate_(sample_rate) {
@@ -87,4 +87,4 @@ void Compressor::process(size_t channels, float* const* channel_ptrs, size_t fra
     last_gr_db_.store(max_gr_in_block, std::memory_order_relaxed);
 }
 
-} // namespace metvoice::dsp
+} // namespace muxella::dsp

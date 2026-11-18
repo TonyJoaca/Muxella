@@ -1,6 +1,6 @@
-#include "metvoice/usbip/server.hpp"
-#include "metvoice/usbip/uac1_device.hpp"
-#include "metvoice/usbip/win_rt_socket.hpp"
+﻿#include "muxella/usbip/server.hpp"
+#include "muxella/usbip/uac1_device.hpp"
+#include "muxella/usbip/win_rt_socket.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -342,7 +342,7 @@ bool recv_tcp_line(SOCKET sock, std::string& line, std::string& carry, DWORD tim
 }
 
 int run_attach_broker(const std::string& address, const std::string& token, FileLogger& logger) {
-    metvoice::usbip::ensure_winsock_initialized();
+    muxella::usbip::ensure_winsock_initialized();
     const size_t colon = address.rfind(':');
     if (address.rfind("127.0.0.1:", 0) != 0 || colon == std::string::npos || token.size() != 64) {
         logger.log("Administrator broker: invalid parameters");
@@ -409,7 +409,7 @@ public:
             return;
         }
 
-        metvoice::usbip::ensure_winsock_initialized();
+        muxella::usbip::ensure_winsock_initialized();
         SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (ls == INVALID_SOCKET) return;
 
@@ -788,21 +788,21 @@ bool install_usbip_driver(FileLogger& logger, std::string* err) {
     return true;
 }
 
-bool run_self_test(const std::vector<std::unique_ptr<metvoice::usbip::Uac1Device>>& devices, std::string& err) {
+bool run_self_test(const std::vector<std::unique_ptr<muxella::usbip::Uac1Device>>& devices, std::string& err) {
     for (const auto& dev : devices) {
         if (!dev->descriptors().validate(&err)) return false;
         std::vector<uint8_t> resp;
-        if (dev->handle_control({0x00, metvoice::usbip::kReqSetConfiguration, 1, 0, 0}, nullptr, 0, resp) != 0) {
+        if (dev->handle_control({0x00, muxella::usbip::kReqSetConfiguration, 1, 0, 0}, nullptr, 0, resp) != 0) {
             err = "set configuration failed";
             return false;
         }
         for (uint16_t iface : {uint16_t{1}, uint16_t{2}}) {
-            if (dev->handle_control({0x01, metvoice::usbip::kReqSetInterface, 1, iface, 0}, nullptr, 0, resp) != 0) {
+            if (dev->handle_control({0x01, muxella::usbip::kReqSetInterface, 1, iface, 0}, nullptr, 0, resp) != 0) {
                 err = "activate interface failed";
                 return false;
             }
         }
-        const size_t frame_bytes = static_cast<size_t>(metvoice::usbip::kUacChannels) * static_cast<size_t>(dev->pcm_bytes());
+        const size_t frame_bytes = static_cast<size_t>(muxella::usbip::kUacChannels) * static_cast<size_t>(dev->pcm_bytes());
         std::vector<uint8_t> pcm(frame_bytes * 2);
         for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = static_cast<uint8_t>(0x11 + i);
         std::vector<uint8_t> pcm_copy = pcm;
@@ -820,11 +820,11 @@ bool run_self_test(const std::vector<std::unique_ptr<metvoice::usbip::Uac1Device
     return true;
 }
 
-std::vector<std::unique_ptr<metvoice::usbip::Uac1Device>> make_devices(int count, int buffer_ms, int bits, std::string* err) {
-    std::vector<std::unique_ptr<metvoice::usbip::Uac1Device>> devs;
+std::vector<std::unique_ptr<muxella::usbip::Uac1Device>> make_devices(int count, int buffer_ms, int bits, std::string* err) {
+    std::vector<std::unique_ptr<muxella::usbip::Uac1Device>> devs;
     devs.reserve(static_cast<size_t>(count));
     for (int i = 1; i <= count; ++i) {
-        auto d = metvoice::usbip::Uac1Device::create(i, buffer_ms, bits, err);
+        auto d = muxella::usbip::Uac1Device::create(i, buffer_ms, bits, err);
         if (!d) return {};
         devs.push_back(std::move(d));
     }
@@ -931,7 +931,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    metvoice::usbip::UsbipServer server(address, std::move(devices), [&](const std::string& msg) {
+    muxella::usbip::UsbipServer server(address, std::move(devices), [&](const std::string& msg) {
         logger.log(msg);
     });
     if (!server.start(&err)) {

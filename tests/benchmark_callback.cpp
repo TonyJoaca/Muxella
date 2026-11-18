@@ -1,4 +1,4 @@
-#include "metvoice/matrix/engine.hpp"
+﻿#include "muxella/matrix/engine.hpp"
 #include <iostream>
 #include <chrono>
 #include <vector>
@@ -8,7 +8,7 @@
 
 int main() {
     std::cout << "===============================================================\n";
-    std::cout << "  MetVoice Audio Engine Benchmark: Real-Time Callback Latency  \n";
+    std::cout << "  Muxella Audio Engine Benchmark: Real-Time Callback Latency  \n";
     std::cout << "===============================================================\n\n";
 
     constexpr size_t STRIPS = 8;
@@ -17,7 +17,7 @@ int main() {
     constexpr size_t ITERATIONS = 50000; // 50,000 blocks = 500 seconds of audio
 
     std::cout << "Configuring 8x8 Full Matrix Mixer (8 Strips x 8 Buses)...\n";
-    metvoice::matrix::MixerEngine engine(STRIPS, BUSES, BLOCK_SIZE, 48000.0f);
+    muxella::matrix::MixerEngine engine(STRIPS, BUSES, BLOCK_SIZE, 48000.0f);
 
     // Enable full processing load: EQ + Compressor on all 8 strips, limiter on all 8 buses
     for (size_t i = 0; i < STRIPS; ++i) {

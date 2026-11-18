@@ -1,4 +1,4 @@
-# Restore Original Virtual Audio Endpoint Names
+﻿# Restore Original Virtual Audio Endpoint Names
 
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "  Restoring Original Endpoint Names" -ForegroundColor Cyan
@@ -35,14 +35,14 @@ function Get-EndpointLabel($regRelPath) {
 }
 
 $renderRestore = @{
-    "MetVoice Main VAIO"    = "Voicemeeter Input"
-    "MetVoice Spotify VAIO" = "Voicemeeter AUX Input"
-    "MetVoice Discord VAIO" = "Voicemeeter VAIO3 Input"
+    "Muxella Main VAIO"    = "Voicemeeter Input"
+    "Muxella Spotify VAIO" = "Voicemeeter AUX Input"
+    "Muxella Discord VAIO" = "Voicemeeter VAIO3 Input"
 }
 
 $captureRestore = @{
-    "MetVoice Out B1" = "Voicemeeter Out B1"
-    "MetVoice Out B2" = "Voicemeeter Out B2"
+    "Muxella Out B1" = "Voicemeeter Out B1"
+    "Muxella Out B2" = "Voicemeeter Out B2"
 }
 
 $renderBase = "SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render"
