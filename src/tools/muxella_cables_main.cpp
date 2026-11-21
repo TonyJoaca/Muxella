@@ -580,7 +580,7 @@ private:
     std::thread accept_thread_;
 };
 
-// Simple WinHTTP GET supporting GitHub HTTPS redirects (to objects.githubusercontent.com).
+// Simple WinHTTP GET supporting GitHub HTTPS redirects (to release-assets.githubusercontent.com / S3).
 bool validate_github_url(const std::wstring& url_str) {
     URL_COMPONENTS uc{};
     uc.dwStructSize = sizeof(uc);
@@ -589,10 +589,12 @@ bool validate_github_url(const std::wstring& url_str) {
     uc.dwHostNameLength = static_cast<DWORD>(std::size(host));
     if (!WinHttpCrackUrl(url_str.c_str(), 0, 0, &uc)) return false;
     if (uc.nScheme != INTERNET_SCHEME_HTTPS) return false;
-    const std::string h = to_lower_ascii(wide_to_utf8(host));
-    return h == "github.com" || h == "api.github.com" ||
-           h == "objects.githubusercontent.com" ||
-           (h.size() > 19 && h.compare(h.size() - 19, 19, ".githubusercontent.com") == 0);
+    const std::string h = to_lower_ascii(wide_to_utf8(std::wstring(host, uc.dwHostNameLength)));
+    return h == "github.com" ||
+           h.ends_with(".github.com") ||
+           h.ends_with(".githubusercontent.com") ||
+           h.ends_with(".githubassets.com") ||
+           (h.ends_with(".amazonaws.com") && h.find("github") != std::string::npos);
 }
 
 bool winhttp_download_bytes(const std::wstring& url_str, const wchar_t* accept_hdr,
@@ -609,11 +611,14 @@ bool winhttp_download_bytes(const std::wstring& url_str, const wchar_t* accept_h
     URL_COMPONENTS uc{};
     uc.dwStructSize = sizeof(uc);
     wchar_t host[256]{};
-    wchar_t path[2048]{};
+    wchar_t path[4096]{};
+    wchar_t extra[4096]{};
     uc.lpszHostName = host;
     uc.dwHostNameLength = static_cast<DWORD>(std::size(host));
     uc.lpszUrlPath = path;
     uc.dwUrlPathLength = static_cast<DWORD>(std::size(path));
+    uc.lpszExtraInfo = extra;
+    uc.dwExtraInfoLength = static_cast<DWORD>(std::size(extra));
     if (!WinHttpCrackUrl(url_str.c_str(), 0, 0, &uc)) {
         if (err) *err = "invalid URL";
         return false;
@@ -625,8 +630,13 @@ bool winhttp_download_bytes(const std::wstring& url_str, const wchar_t* accept_h
     DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     WinHttpSetOption(hSess, WINHTTP_OPTION_REDIRECT_POLICY, &redirect_policy, sizeof(redirect_policy));
 
-    HINTERNET hConn = WinHttpConnect(hSess, host, uc.nPort, 0);
-    HINTERNET hReq = hConn ? WinHttpOpenRequest(hConn, L"GET", path[0] ? path : L"/",
+    std::wstring req_path = (uc.dwUrlPathLength > 0) ? std::wstring(path, uc.dwUrlPathLength) : L"/";
+    if (uc.dwExtraInfoLength > 0) {
+        req_path.append(extra, uc.dwExtraInfoLength);
+    }
+
+    HINTERNET hConn = WinHttpConnect(hSess, std::wstring(host, uc.dwHostNameLength).c_str(), uc.nPort, 0);
+    HINTERNET hReq = hConn ? WinHttpOpenRequest(hConn, L"GET", req_path.c_str(),
                                                 nullptr, WINHTTP_NO_REFERER,
                                                 WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
                            : nullptr;
@@ -642,7 +652,7 @@ bool winhttp_download_bytes(const std::wstring& url_str, const wchar_t* accept_h
             WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                                 nullptr, &status, &s_len, nullptr);
             if (status >= 300 && status < 400) {
-                wchar_t loc[2048]{};
+                wchar_t loc[4096]{};
                 DWORD loc_len = sizeof(loc);
                 if (WinHttpQueryHeaders(hReq, WINHTTP_QUERY_LOCATION, nullptr, loc, &loc_len, nullptr)) {
                     WinHttpCloseHandle(hReq);

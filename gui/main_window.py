@@ -129,7 +129,7 @@ def is_start_with_windows_enabled() -> bool:
             winreg.KEY_READ
         )
         val = None
-        for k in ["Muxella", "Muxella"]:
+        for k in ["Muxella", "MetVoice"]:
             try:
                 val, _ = winreg.QueryValueEx(key, k)
                 if val: break
@@ -166,11 +166,11 @@ def set_start_with_windows(enable: bool) -> bool:
             winreg.SetValueEx(key, "Muxella", 0, winreg.REG_SZ, cmd)
             # Remove legacy key if present
             try:
-                winreg.DeleteValue(key, "Muxella")
+                winreg.DeleteValue(key, "MetVoice")
             except FileNotFoundError:
                 pass
         else:
-            for k in ["Muxella", "Muxella"]:
+            for k in ["Muxella", "MetVoice"]:
                 try:
                     winreg.DeleteValue(key, k)
                 except FileNotFoundError:
